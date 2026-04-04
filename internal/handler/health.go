@@ -65,8 +65,8 @@ func (h *HealthHandler) ServiceInfo(w http.ResponseWriter, r *http.Request) {
 // @Summary Root endpoint
 // @Description Returns a welcome message
 // @Tags root
-// @Accept json
-// @Produce json
+// @Accept JSON
+// @Produce JSON
 // @Success 200 {object} map[string]string
 // @Router / [get]
 func (h *HealthHandler) RootHandler(w http.ResponseWriter, r *http.Request) {
