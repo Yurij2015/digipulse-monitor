@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Documentation
+*.md
+LICENSE
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+main
+
+# Test
+*_test.go
+*.test
+
+# Vendor (if using modules)
+vendor/
+
+# Environment files
+.env
+.env.local
+.env.*.local
