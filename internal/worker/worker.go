@@ -3,10 +3,15 @@ package worker
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"monitor/internal/config"
@@ -20,8 +25,15 @@ type CheckTask struct {
 	SiteID          uint                   `json:"site_id"`
 	URL             string                 `json:"url"`
 	Type            string                 `json:"type"`
-	Params          map[string]interface{} `json:"params"`
+	Params          interface{}            `json:"params"`
 	ScheduledAt     string                 `json:"scheduled_at"`
+}
+
+func (t *CheckTask) GetParamsMap() map[string]interface{} {
+	if m, ok := t.Params.(map[string]interface{}); ok {
+		return m
+	}
+	return make(map[string]interface{})
 }
 
 type CheckResult struct {
@@ -86,33 +98,194 @@ func (w *Worker) Start(ctx context.Context) {
 }
 
 func (w *Worker) processTask(task CheckTask) {
-	start := time.Now()
 	log.Printf("Processing [%s] check for Site: %s", task.Type, task.URL)
 
 	var result CheckResult
 	result.ConfigurationID = task.ConfigurationID
 
-	// Perform basic HTTP check for now
+	switch task.Type {
+	case "http":
+		w.checkHTTP(&task, &result)
+	case "keyword":
+		w.checkKeyword(&task, &result)
+	case "ssl":
+		w.checkSSL(&task, &result)
+	case "dns":
+		w.checkDNS(&task, &result)
+	case "port":
+		w.checkPort(&task, &result)
+	default:
+		w.checkHTTP(&task, &result) // Default to HTTP
+	}
+
+	w.reportResult(result)
+}
+
+func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
+	start := time.Now()
 	client := http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(task.URL)
-
-	elapsed := time.Since(start).Milliseconds()
-	result.ResponseTimeMS = elapsed
+	result.ResponseTimeMS = time.Since(start).Milliseconds()
 
 	if err != nil {
 		result.Status = "down"
 		result.ErrorMessage = err.Error()
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+		result.Status = "up"
 	} else {
-		defer resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-			result.Status = "up"
+		result.Status = "down"
+		result.ErrorMessage = fmt.Sprintf("HTTP Status: %d", resp.StatusCode)
+	}
+}
+
+func (w *Worker) checkKeyword(task *CheckTask, result *CheckResult) {
+	params := task.GetParamsMap()
+	keyword, ok := params["keyword"].(string)
+	if !ok || keyword == "" {
+		result.Status = "down"
+		result.ErrorMessage = "Keyword parameter is missing or empty"
+		return
+	}
+
+	start := time.Now()
+	client := http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(task.URL)
+	result.ResponseTimeMS = time.Since(start).Milliseconds()
+
+	if err != nil {
+		result.Status = "down"
+		result.ErrorMessage = err.Error()
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		result.Status = "down"
+		result.ErrorMessage = "Failed to read response body: " + err.Error()
+		return
+	}
+
+	if strings.Contains(string(body), keyword) {
+		result.Status = "up"
+	} else {
+		result.Status = "down"
+		result.ErrorMessage = fmt.Sprintf("Keyword '%s' not found on page", keyword)
+	}
+}
+
+func (w *Worker) checkSSL(task *CheckTask, result *CheckResult) {
+	start := time.Now()
+	u := task.URL
+	if strings.HasPrefix(u, "http://") {
+		u = strings.Replace(u, "http://", "", 1)
+	} else if strings.HasPrefix(u, "https://") {
+		u = strings.Replace(u, "https://", "", 1)
+	}
+
+	// Strip path if any
+	if idx := strings.Index(u, "/"); idx != -1 {
+		u = u[:idx]
+	}
+
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", u+":443", nil)
+	result.ResponseTimeMS = time.Since(start).Milliseconds()
+
+	if err != nil {
+		result.Status = "down"
+		result.ErrorMessage = "SSL Dial Error: " + err.Error()
+		return
+	}
+	defer conn.Close()
+
+	cert := conn.ConnectionState().PeerCertificates[0]
+	daysRemaining := int(cert.NotAfter.Sub(time.Now()).Hours() / 24)
+
+	result.Metadata = map[string]interface{}{
+		"issuer":         cert.Issuer.CommonName,
+		"days_remaining": daysRemaining,
+		"expires_at":     cert.NotAfter.Format(time.RFC3339),
+	}
+
+	if daysRemaining < 0 {
+		result.Status = "down"
+		result.ErrorMessage = "Certificate expired"
+	} else if daysRemaining < 7 {
+		result.Status = "up" // Still reachable but warning could be added in metadata
+	} else {
+		result.Status = "up"
+	}
+}
+
+func (w *Worker) checkDNS(task *CheckTask, result *CheckResult) {
+	start := time.Now()
+	host := task.URL
+	if idx := strings.Index(host, "://"); idx != -1 {
+		host = host[idx+3:]
+	}
+	if idx := strings.Index(host, "/"); idx != -1 {
+		host = host[:idx]
+	}
+
+	ips, err := net.LookupIP(host)
+	result.ResponseTimeMS = time.Since(start).Milliseconds()
+
+	if err != nil || len(ips) == 0 {
+		result.Status = "down"
+		result.ErrorMessage = "DNS Lookup failed"
+		if err != nil {
+			result.ErrorMessage += ": " + err.Error()
+		}
+		return
+	}
+
+	ipStrs := make([]string, len(ips))
+	for i, ip := range ips {
+		ipStrs[i] = ip.String()
+	}
+
+	result.Status = "up"
+	result.Metadata = map[string]interface{}{
+		"ips": ipStrs,
+	}
+}
+
+func (w *Worker) checkPort(task *CheckTask, result *CheckResult) {
+	params := task.GetParamsMap()
+	portStr, ok := params["port"].(string)
+	if !ok {
+		// Try float64 if it came from JSON as number
+		if portNum, ok := params["port"].(float64); ok {
+			portStr = strconv.Itoa(int(portNum))
 		} else {
-			result.Status = "down"
-			result.ErrorMessage = fmt.Sprintf("HTTP Status: %d", resp.StatusCode)
+			portStr = "443" // Default
 		}
 	}
 
-	w.reportResult(result)
+	host := task.URL
+	if idx := strings.Index(host, "://"); idx != -1 {
+		host = host[idx+3:]
+	}
+	if idx := strings.Index(host, "/"); idx != -1 {
+		host = host[:idx]
+	}
+
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, portStr), 5*time.Second)
+	result.ResponseTimeMS = time.Since(start).Milliseconds()
+
+	if err != nil {
+		result.Status = "down"
+		result.ErrorMessage = "Port not reachable: " + err.Error()
+		return
+	}
+	defer conn.Close()
+
+	result.Status = "up"
 }
 
 func (w *Worker) reportResult(result CheckResult) {
