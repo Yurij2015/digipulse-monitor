@@ -9,6 +9,20 @@ import (
 type Config struct {
 	Server   ServerConfig
 	Log      LogConfig
+	Redis    RedisConfig
+	Backend  BackendConfig
+}
+
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
+	Key      string
+}
+
+type BackendConfig struct {
+	BaseURL string
+	Key     string
 }
 
 // ServerConfig holds server-related configuration
@@ -35,6 +49,16 @@ func Load() *Config {
 		Log: LogConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),
 			Format: getEnv("LOG_FORMAT", "json"),
+		},
+		Redis: RedisConfig{
+			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       getEnvAsInt("REDIS_DB", 0),
+			Key:      getEnv("MONITOR_REDIS_KEY", "monitoring:tasks"),
+		},
+		Backend: BackendConfig{
+			BaseURL: getEnv("BACKEND_URL", "http://localhost:8000/api/internal"),
+			Key:     getEnv("MONITOR_API_KEY", ""),
 		},
 	}
 }

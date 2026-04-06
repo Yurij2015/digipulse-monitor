@@ -11,12 +11,13 @@ import (
 	"net/http"
 
 	"github.com/swaggo/http-swagger/v2"
-
+	"context"
 	_ "monitor/api/swagger"
 	"monitor/internal/config"
 	"monitor/internal/handler"
 	"monitor/internal/middleware"
 	"monitor/internal/service"
+	"monitor/internal/worker"
 )
 
 const version = "1.0.0"
@@ -27,6 +28,13 @@ func main() {
 	// Initialize services
 	monitorService := service.NewMonitorService(version)
 	healthHandler := handler.NewHealthHandler(version)
+	
+	// Start workers
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	
+	redisWorker := worker.NewWorker(cfg)
+	go redisWorker.Start(ctx)
 
 	// Create router
 	mux := http.NewServeMux()
