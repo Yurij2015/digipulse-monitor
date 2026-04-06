@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -20,13 +21,13 @@ import (
 )
 
 type CheckTask struct {
-	ID              string                 `json:"id"`
-	ConfigurationID uint                   `json:"configuration_id"`
-	SiteID          uint                   `json:"site_id"`
-	URL             string                 `json:"url"`
-	Type            string                 `json:"type"`
-	Params          interface{}            `json:"params"`
-	ScheduledAt     string                 `json:"scheduled_at"`
+	ID              string      `json:"id"`
+	ConfigurationID uint        `json:"configuration_id"`
+	SiteID          uint        `json:"site_id"`
+	URL             string      `json:"url"`
+	Type            string      `json:"type"`
+	Params          interface{} `json:"params"`
+	ScheduledAt     string      `json:"scheduled_at"`
 }
 
 func (t *CheckTask) GetParamsMap() map[string]interface{} {
@@ -74,7 +75,7 @@ func (w *Worker) Start(ctx context.Context) {
 			// BRPOP for blocking read
 			result, err := w.redis.BRPop(ctx, 0, w.cfg.Redis.Key).Result()
 			if err != nil {
-				if err != context.Canceled {
+				if !errors.Is(err, context.Canceled) {
 					log.Printf("Error popping from Redis: %v", err)
 				}
 				continue

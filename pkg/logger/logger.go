@@ -1,23 +1,62 @@
 package logger
 
 import (
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 )
 
-// Logger provides structured logging
+// Logger provides structured logging like Laravel: writes both to file AND console
 type Logger struct {
 	infoLogger  *log.Logger
 	errorLogger *log.Logger
 	debugLogger *log.Logger
+	logFile     *os.File
 }
 
-// New creates a new logger instance
+// New creates a new logger instance with file logging (storage/logs/monitor.log)
 func New() *Logger {
+	// Create logs directory like Laravel storage/logs
+	logDir := "storage/logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Printf("Failed to create logs directory: %v", err)
+	}
+
+	logPath := filepath.Join(logDir, "monitor.log")
+
+	// Open log file for appending, create if not exists
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Printf("Failed to open log file: %v, using only stdout", err)
+		logFile = nil
+	}
+
+	// Multi writer: write BOTH to stdout AND file
+	multiWriter := io.MultiWriter(os.Stdout)
+	if logFile != nil {
+		multiWriter = io.MultiWriter(os.Stdout, logFile)
+	}
+
+	errorMultiWriter := io.MultiWriter(os.Stderr)
+	if logFile != nil {
+		errorMultiWriter = io.MultiWriter(os.Stderr, logFile)
+	}
+
+	flags := log.Ldate | log.Ltime | log.Lshortfile
+
 	return &Logger{
-		infoLogger:  log.New(os.Stdout, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile),
-		errorLogger: log.New(os.Stderr, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile),
-		debugLogger: log.New(os.Stdout, "DEBUG: ", log.Ldate|log.Ltime|log.Lshortfile),
+		infoLogger:  log.New(multiWriter, "INFO: ", flags),
+		errorLogger: log.New(errorMultiWriter, "ERROR: ", flags),
+		debugLogger: log.New(multiWriter, "DEBUG: ", flags),
+		logFile:     logFile,
+	}
+}
+
+// Close closes the log file
+func (l *Logger) Close() {
+	if l.logFile != nil {
+		_ = l.logFile.Close()
 	}
 }
 
