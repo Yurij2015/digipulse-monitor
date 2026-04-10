@@ -14,12 +14,18 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Monitor service is running")
+		_, err := fmt.Fprintf(w, "Monitor service is running")
+		if err != nil {
+			return
+		}
 	})
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "OK")
+		_, err := fmt.Fprintf(w, "OK")
+		if err != nil {
+			return
+		}
 	})
 
 	log.Printf("Server starting on port %s", port)

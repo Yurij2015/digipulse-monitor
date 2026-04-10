@@ -7,10 +7,10 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	Server   ServerConfig
-	Log      LogConfig
-	Redis    RedisConfig
-	Backend  BackendConfig
+	Server  ServerConfig
+	Log     LogConfig
+	Redis   RedisConfig
+	Backend BackendConfig
 }
 
 type RedisConfig struct {
