@@ -52,6 +52,23 @@ docker-compose up -d --build
 docker-compose down
 ```
 
+### Docker Development (hot reload)
+
+For local containerized development with automatic restart on file changes, use the dev override:
+
+```bash
+# Start in foreground with hot reload
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# Or use Makefile target
+make compose-dev-up
+
+# Stop dev stack
+make compose-dev-down
+```
+
+This mode uses `Dockerfile.dev` + `.air.toml` and watches source files inside the mounted project directory.
+
 ### Environment Variables
 
 | Variable | Default | Description |
