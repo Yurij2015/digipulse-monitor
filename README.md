@@ -4,7 +4,7 @@ A Go-based monitoring service with Docker support.
 
 ## Project Structure
 
-```
+```text
 monitor/
 ├── cmd/
 │   └── monitor/
@@ -71,14 +71,18 @@ This mode uses `Dockerfile.dev` + `.air.toml` and watches source files inside th
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable | Default | Description                |
+|----------|---------|----------------------------|
 | PORT     | 8080    | Port the service listens on |
 
 ## API Endpoints
 
 - `GET /` - Returns service status message
 - `GET /health` - Health check endpoint (returns 200 OK)
+
+## Site Verification (Checkers)
+
+For technical details on how the service performs checks (HTTP, SSL, DNS, Port), refer to the [Checkers Documentation](docs/checkers.md).
 
 ## Development
 
