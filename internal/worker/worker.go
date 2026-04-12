@@ -198,7 +198,7 @@ func (w *Worker) checkSSL(task *CheckTask, result *CheckResult) {
 	defer conn.Close()
 
 	cert := conn.ConnectionState().PeerCertificates[0]
-	daysRemaining := int(cert.NotAfter.Sub(time.Now()).Hours() / 24)
+	daysRemaining := int(time.Until(cert.NotAfter).Hours() / 24)
 
 	result.Metadata = map[string]interface{}{
 		"issuer":         cert.Issuer.CommonName,
