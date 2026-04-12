@@ -26,6 +26,7 @@ type CheckTask struct {
 	URL             string      `json:"url"`
 	Type            string      `json:"type"`
 	Params          interface{} `json:"params"`
+	UpdateInterval  int         `json:"update_interval"`
 	ScheduledAt     string      `json:"scheduled_at"`
 }
 
@@ -63,30 +64,29 @@ func NewWorker(cfg *config.Config) *Worker {
 }
 
 func (w *Worker) Start(ctx context.Context) {
-	log.Printf("Starting Redis worker on channel: %s", w.cfg.Redis.ChannelName)
-
-	PubNub := w.redis.Subscribe(ctx, w.cfg.Redis.ChannelName)
-	defer func(PubNub *redis.PubSub) {
-		err := PubNub.Close()
-		if err != nil {
-			log.Printf("Error closing Redis connection: %v", err)
-		}
-	}(PubNub)
-
-	ch := PubNub.Channel()
+	log.Printf("Starting Redis worker (Queue mode) on key: %s", w.cfg.Redis.ChannelName)
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Worker shutting down...")
 			return
-		case msg := <-ch:
-			if msg == nil {
+		default:
+			// BRPOP returns [key, value]
+			res, err := w.redis.BRPop(ctx, 0, w.cfg.Redis.ChannelName).Result()
+			if err != nil {
+				if err != ctx.Err() {
+					log.Printf("Error popping task: %v", err)
+				}
+				continue
+			}
+
+			if len(res) < 2 {
 				continue
 			}
 
 			var task CheckTask
-			if err := json.Unmarshal([]byte(msg.Payload), &task); err != nil {
+			if err := json.Unmarshal([]byte(res[1]), &task); err != nil {
 				log.Printf("Error unmarshaling task: %v", err)
 				continue
 			}
@@ -98,6 +98,19 @@ func (w *Worker) Start(ctx context.Context) {
 }
 
 func (w *Worker) processTask(task CheckTask) {
+	// Expiration check: (update_interval * 2) - 1
+	if task.ScheduledAt != "" && task.UpdateInterval > 0 {
+		scheduledTime, err := time.Parse(time.RFC3339, task.ScheduledAt)
+		if err == nil {
+			maxAge := time.Duration((task.UpdateInterval*2)-1) * time.Second
+			if time.Since(scheduledTime) > maxAge {
+				log.Printf("Skipping stale task [%s] for %s (Scheduled: %s, Max Age: %v)",
+					task.ID, task.URL, task.ScheduledAt, maxAge)
+				return
+			}
+		}
+	}
+
 	log.Printf("Processing [%s] check for Site: %s", task.Type, task.URL)
 
 	var result CheckResult
@@ -122,7 +135,19 @@ func (w *Worker) processTask(task CheckTask) {
 func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
 	start := time.Now()
 	client := http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Head(task.URL)
+
+	req, err := http.NewRequest("GET", task.URL, nil)
+	if err != nil {
+		result.Status = "down"
+		result.ErrorMessage = "Request creation failed: " + err.Error()
+		return
+	}
+
+	// Set common headers to avoid being blocked as a bot
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; DigiPulse/1.0)")
+	req.Header.Set("Accept", "*/*")
+
+	resp, err := client.Do(req)
 	result.ResponseTimeMS = time.Since(start).Milliseconds()
 
 	if err != nil {
@@ -137,7 +162,7 @@ func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
 		}
 	}(resp.Body)
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+	if resp.StatusCode < 500 {
 		result.Status = "up"
 	} else {
 		result.Status = "down"
