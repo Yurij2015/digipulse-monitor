@@ -119,7 +119,7 @@ func (w *Worker) processTask(task CheckTask) {
 func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
 	start := time.Now()
 	client := http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(task.URL)
+	resp, err := client.Head(task.URL)
 	result.ResponseTimeMS = time.Since(start).Milliseconds()
 
 	if err != nil {
