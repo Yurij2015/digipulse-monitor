@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -64,30 +63,25 @@ func NewWorker(cfg *config.Config) *Worker {
 }
 
 func (w *Worker) Start(ctx context.Context) {
-	log.Printf("Starting Redis worker on queue: %s", w.cfg.Redis.Key)
+	log.Printf("Starting Redis worker on channel: %s", w.cfg.Redis.Key)
+
+	pubsub := w.redis.Subscribe(ctx, w.cfg.Redis.Key)
+	defer pubsub.Close()
+
+	ch := pubsub.Channel()
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Worker shutting down...")
 			return
-		default:
-			// BRPOP for blocking read
-			result, err := w.redis.BRPop(ctx, 0, w.cfg.Redis.Key).Result()
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					log.Printf("Error popping from Redis: %v", err)
-				}
+		case msg := <-ch:
+			if msg == nil {
 				continue
 			}
 
-			if len(result) < 2 {
-				continue
-			}
-
-			payload := result[1]
 			var task CheckTask
-			if err := json.Unmarshal([]byte(payload), &task); err != nil {
+			if err := json.Unmarshal([]byte(msg.Payload), &task); err != nil {
 				log.Printf("Error unmarshaling task: %v", err)
 				continue
 			}
