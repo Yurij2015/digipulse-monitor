@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -101,8 +100,6 @@ func (w *Worker) processTask(task CheckTask) {
 	switch task.Type {
 	case "http":
 		w.checkHTTP(&task, &result)
-	case "keyword":
-		w.checkKeyword(&task, &result)
 	case "ssl":
 		w.checkSSL(&task, &result)
 	case "dns":
@@ -134,42 +131,6 @@ func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
 	} else {
 		result.Status = "down"
 		result.ErrorMessage = fmt.Sprintf("HTTP Status: %d", resp.StatusCode)
-	}
-}
-
-func (w *Worker) checkKeyword(task *CheckTask, result *CheckResult) {
-	params := task.GetParamsMap()
-	keyword, ok := params["keyword"].(string)
-	if !ok || keyword == "" {
-		result.Status = "down"
-		result.ErrorMessage = "Keyword parameter is missing or empty"
-		return
-	}
-
-	start := time.Now()
-	client := http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(task.URL)
-	result.ResponseTimeMS = time.Since(start).Milliseconds()
-
-	if err != nil {
-		result.Status = "down"
-		result.ErrorMessage = err.Error()
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		result.Status = "down"
-		result.ErrorMessage = "Failed to read response body: " + err.Error()
-		return
-	}
-
-	if strings.Contains(string(body), keyword) {
-		result.Status = "up"
-	} else {
-		result.Status = "down"
-		result.ErrorMessage = fmt.Sprintf("Keyword '%s' not found on page", keyword)
 	}
 }
 
