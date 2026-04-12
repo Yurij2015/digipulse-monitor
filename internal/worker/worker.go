@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -64,10 +65,15 @@ func NewWorker(cfg *config.Config) *Worker {
 func (w *Worker) Start(ctx context.Context) {
 	log.Printf("Starting Redis worker on channel: %s", w.cfg.Redis.ChannelName)
 
-	pubsub := w.redis.Subscribe(ctx, w.cfg.Redis.ChannelName)
-	defer pubsub.Close()
+	PubNub := w.redis.Subscribe(ctx, w.cfg.Redis.ChannelName)
+	defer func(PubNub *redis.PubSub) {
+		err := PubNub.Close()
+		if err != nil {
+			log.Printf("Error closing Redis connection: %v", err)
+		}
+	}(PubNub)
 
-	ch := pubsub.Channel()
+	ch := PubNub.Channel()
 
 	for {
 		select {
@@ -124,7 +130,12 @@ func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
 		result.ErrorMessage = err.Error()
 		return
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Error closing response body: %v", err)
+		}
+	}(resp.Body)
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		result.Status = "up"
@@ -156,7 +167,12 @@ func (w *Worker) checkSSL(task *CheckTask, result *CheckResult) {
 		result.ErrorMessage = "SSL Dial Error: " + err.Error()
 		return
 	}
-	defer conn.Close()
+	defer func(conn *tls.Conn) {
+		err := conn.Close()
+		if err != nil {
+			log.Printf("Error closing SSL connection: %v", err)
+		}
+	}(conn)
 
 	cert := conn.ConnectionState().PeerCertificates[0]
 	daysRemaining := int(time.Until(cert.NotAfter).Hours() / 24)
@@ -239,7 +255,12 @@ func (w *Worker) checkPort(task *CheckTask, result *CheckResult) {
 		result.ErrorMessage = "Port not reachable: " + err.Error()
 		return
 	}
-	defer conn.Close()
+	defer func(conn net.Conn) {
+		err := conn.Close()
+		if err != nil {
+			log.Printf("Error closing port connection: %v", err)
+		}
+	}(conn)
 
 	result.Status = "up"
 }
@@ -267,7 +288,12 @@ func (w *Worker) reportResult(result CheckResult) {
 		log.Printf("Error reporting result: %v", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Error closing response body: %v", err)
+		}
+	}(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Backend reported error status: %d", resp.StatusCode)

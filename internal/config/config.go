@@ -57,7 +57,7 @@ func Load() *Config {
 			ChannelName: getEnv("MONITOR_REDIS_CHANNEL", "monitoring:tasks"),
 		},
 		Backend: BackendConfig{
-			BaseURL: getEnv("BACKEND_URL", "http://localhost:8000/api/internal"),
+			BaseURL: getEnv("BACKEND_URL", "http://localhost:8000/api/webhooks"),
 			Key:     getEnv("MONITOR_API_KEY", ""),
 		},
 	}
