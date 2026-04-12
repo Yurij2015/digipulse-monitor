@@ -14,10 +14,10 @@ type Config struct {
 }
 
 type RedisConfig struct {
-	Addr     string
-	Password string
-	DB       int
-	Key      string
+	Addr        string
+	Password    string
+	DB          int
+	ChannelName string
 }
 
 type BackendConfig struct {
@@ -51,10 +51,10 @@ func Load() *Config {
 			Format: getEnv("LOG_FORMAT", "json"),
 		},
 		Redis: RedisConfig{
-			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),
-			Password: getEnv("REDIS_PASSWORD", ""),
-			DB:       getEnvAsInt("REDIS_DB", 0),
-			Key:      getEnv("MONITOR_REDIS_KEY", "monitoring:tasks"),
+			Addr:        getEnv("REDIS_ADDR", "localhost:6379"),
+			Password:    getEnv("REDIS_PASSWORD", ""),
+			DB:          getEnvAsInt("REDIS_DB", 0),
+			ChannelName: getEnv("MONITOR_REDIS_CHANNEL", "monitoring:tasks"),
 		},
 		Backend: BackendConfig{
 			BaseURL: getEnv("BACKEND_URL", "http://localhost:8000/api/internal"),

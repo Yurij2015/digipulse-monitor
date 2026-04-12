@@ -63,9 +63,9 @@ func NewWorker(cfg *config.Config) *Worker {
 }
 
 func (w *Worker) Start(ctx context.Context) {
-	log.Printf("Starting Redis worker on channel: %s", w.cfg.Redis.Key)
+	log.Printf("Starting Redis worker on channel: %s", w.cfg.Redis.ChannelName)
 
-	pubsub := w.redis.Subscribe(ctx, w.cfg.Redis.Key)
+	pubsub := w.redis.Subscribe(ctx, w.cfg.Redis.ChannelName)
 	defer pubsub.Close()
 
 	ch := pubsub.Channel()
