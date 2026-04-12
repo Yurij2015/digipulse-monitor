@@ -28,10 +28,15 @@ fmt:
 	@echo "Formatting code..."
 	go fmt ./...
 
+.PHONY: lint
+lint:
+	@echo "Running linter (go vet)..."
+	go vet ./...
+
 .PHONY: clean
 clean:
 	@echo "Cleaning up..."
 	rm -rf bin/
 
 .PHONY: check
-check: fmt tidy build test
+check: fmt lint tidy build test
