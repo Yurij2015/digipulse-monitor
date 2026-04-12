@@ -32,7 +32,7 @@ type ServerConfig struct {
 	WriteTimeout int
 }
 
-// LogConfig holds logging configuration
+// LogConfig holds the logging configuration
 type LogConfig struct {
 	Level  string
 	Format string
