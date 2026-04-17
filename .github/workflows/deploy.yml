@@ -24,6 +24,17 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o monitor_app ./main.go
 
+      - name: Bootstrap server directories
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            # Idempotent: create all required dirs on a clean server
+            mkdir -p /home/yurii/digi-pulse/monitor
+
       - name: Deploy Binary to Hetzner via SCP
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -33,6 +44,24 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           source: "monitor_app"
           target: "/home/yurii/digi-pulse/monitor/"
+
+      - name: Write production .env for monitor
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cat > /home/yurii/digi-pulse/monitor/.env << 'ENVEOF'
+            PORT=8080
+            REDIS_ADDR=${{ secrets.REDIS_HOST }}:6379
+            REDIS_PASSWORD=
+            REDIS_DB=0
+            MONITOR_REDIS_CHANNEL=laravel-database-monitoring:tasks
+            BACKEND_URL=http://digipulse-app:8000/api/webhooks
+            MONITOR_API_KEY=${{ secrets.INTERNAL_MONITOR_KEY }}
+            ENVEOF
 
       - name: Restart Monitor Container via SSH
         uses: appleboy/ssh-action@v1.0.3
