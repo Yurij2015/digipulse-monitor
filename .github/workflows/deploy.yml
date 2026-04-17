@@ -78,6 +78,16 @@ jobs:
           source: "monitor_app"
           target: ${{ matrix.server.path }}/
 
+      - name: Set execute permission
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ matrix.server.ip }}
+          username: ${{ matrix.server.username }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ matrix.server.port }}
+          script: |
+            chmod +x ${{ matrix.server.path }}/monitor_app
+
       - name: Write production .env
         uses: appleboy/ssh-action@v1.2.5
         with:
