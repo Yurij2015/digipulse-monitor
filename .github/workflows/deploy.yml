@@ -33,6 +33,7 @@ jobs:
           name: monitor-binary
           path: monitor_app
           retention-days: 7
+          if-no-files-found: error
 
       - name: Export deployment matrix
         id: export-deployment-matrix
@@ -55,6 +56,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: monitor-binary
+          path: .
 
       - name: Bootstrap server directories
         uses: appleboy/ssh-action@v1.2.5
