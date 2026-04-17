@@ -1,111 +1,53 @@
-# Monitor Service
+# DigiPulse Monitor (Go Service)
 
-A Go-based monitoring service with Docker support.
+Ultra-fast, event-driven site monitoring service built in Go. This service handles the actual website reachability checks and reports results back to the Laravel backend.
 
-## Project Structure
+## Technology Stack
 
-```text
-monitor/
-├── cmd/
-│   └── monitor/
-│       └── main.go        # Application entry point
-├── internal/              # Private application code
-├── pkg/                   # Public library code
-├── configs/               # Configuration files
-├── main.go                # Root main.go (alternative entry point)
-├── go.mod                 # Go module definition
-├── Dockerfile             # Multi-stage Docker build
-├── docker-compose.yml     # Docker Compose configuration
-├── .gitignore             # Git ignore rules
-└── .dockerignore          # Docker ignore rules
-```
+- **Go 1.23**
+- **Redis 7** (Event-driven communication)
+- **Deployment**: Statically compiled binary in an Alpine container.
 
-## Getting Started
+## Architecture
 
-### Prerequisites
+1.  **Job Acquisition**: Listens to a Redis channel for check tasks dispatched by the Laravel Scheduler.
+2.  **Concurrency**: Uses Go routines to perform multiple checks (HTTP, SSL, Ping) simultaneously.
+3.  **Reporting**: Sends results to the Backend API via authenticated webhooks.
 
-- Go 1.22 or higher
-- Docker and Docker Compose (optional)
+## Deployment (CI/CD)
 
-### Running Locally
+Deployments are automated via **GitHub Actions**.
 
-```bash
-# Run directly with Go
-go run main.go
+### Workflow:
+1.  **Build**: Compiles a static Linux binary (`CGO_ENABLED=0`).
+2.  **Deploy**: The binary is uploaded to the server via SCP.
+3.  **Environment**: A production `.env` file is generated on the server.
+4.  **Runtime**: The `digipulse-monitor` container is restarted to execute the new binary.
 
-# Or run from cmd directory
-go run cmd/monitor/main.go
-```
+### Required GitHub Secrets:
 
-The service will start on port 8080 by default.
+| Secret | Description |
+|---|---|
+| `SSH_KEY` | Private SSH key for the Hetzner server. |
+| `REDIS_HOST` | Redis host (usually `digipulse-redis`). |
+| `INTERNAL_MONITOR_KEY` | Shared secret for the Backend API. |
 
-### Running with Docker
+## Local Development
 
-```bash
-# Build and run with Docker Compose
-docker-compose up --build
+1.  Clone the repository.
+2.  Start dependencies: `docker-compose up -d redis`.
+3.  Run the application: `go run main.go`.
 
-# Run in detached mode
-docker-compose up -d --build
+## Environment Variables
 
-# Stop the service
-docker-compose down
-```
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | 8080 | Local API port. |
+| `REDIS_ADDR` | `localhost:6379` | Redis connection address. |
+| `BACKEND_URL` | - | Webhook endpoint of the Laravel API. |
+| `MONITOR_API_KEY` | - | Shared secret for verification. |
 
-### Docker Development (hot reload)
+## Performance
 
-For local containerized development with automatic restart on file changes, use the dev override:
-
-```bash
-# Start in foreground with hot reload
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-
-# Or use Makefile target
-make compose-dev-up
-
-# Stop dev stack
-make compose-dev-down
-```
-
-This mode uses `Dockerfile.dev` + `.air.toml` and watches source files inside the mounted project directory.
-
-### Environment Variables
-
-| Variable | Default | Description                |
-|----------|---------|----------------------------|
-| PORT     | 8080    | Port the service listens on |
-
-## API Endpoints
-
-- `GET /` - Returns service status message
-- `GET /health` - Health check endpoint (returns 200 OK)
-
-## Site Verification (Checkers)
-
-For technical details on how the service performs checks (HTTP, SSL, DNS, Port), refer to the [Checkers Documentation](docs/checkers.md).
-
-## Development
-
-### Building
-
-```bash
-# Build binary
-go build -o main .
-
-# Build with Docker
-docker build -t monitor-service .
-```
-
-### Testing
-
-```bash
-# Run tests
-go test ./...
-
-# Run tests with coverage
-go test -cover ./...
-```
-
-## License
-
-[Add your license here]
+- **Footprint**: < 10MB RAM usage.
+- **Speed**: Optimized for sub-second DNS and HTTP resolution.
