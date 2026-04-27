@@ -138,6 +138,12 @@ func (w *Worker) processTask(task CheckTask) {
 		w.checkHTTP(&task, &result) // Default to HTTP
 	}
 
+	// If the check was successful but took less than 1ms (e.g. local loopback),
+	// record it as 1ms instead of 0ms so it doesn't look like an error.
+	if result.Status == "up" && result.ResponseTimeMS <= 0 {
+		result.ResponseTimeMS = 1
+	}
+
 	w.reportResult(result)
 }
 
@@ -331,15 +337,33 @@ func (w *Worker) checkPing(task *CheckTask, result *CheckResult) {
 	}
 
 	// Parse ping output for average RTT
-	// Format can be 3 numbers (min/avg/max) or 4 (min/avg/max/stddev)
-	re := regexp.MustCompile(`[\d.]+/([\d.]+)/[\d.]+`)
-	matches := re.FindStringSubmatch(string(output))
-	if len(matches) > 1 {
-		avg, _ := strconv.ParseFloat(matches[1], 64)
+	// 1. Try to find the summary line (min/avg/max)
+	summaryRe := regexp.MustCompile(`[\d.,]+/([\d.,]+)/[\d.,]+`)
+	summaryMatches := summaryRe.FindStringSubmatch(string(output))
+
+	if len(summaryMatches) > 1 {
+		avgStr := strings.Replace(summaryMatches[1], ",", ".", 1)
+		avg, _ := strconv.ParseFloat(avgStr, 64)
 		result.ResponseTimeMS = int64(avg)
+	} else {
+		// 2. Fallback: Parse individual lines for "time=X ms" and average them
+		lineRe := regexp.MustCompile(`time=([\d.,]+)`)
+		lineMatches := lineRe.FindAllStringSubmatch(string(output), -1)
+		if len(lineMatches) > 0 {
+			var total float64
+			for _, m := range lineMatches {
+				valStr := strings.Replace(m[1], ",", ".", 1)
+				val, _ := strconv.ParseFloat(valStr, 64)
+				total += val
+			}
+			result.ResponseTimeMS = int64(total / float64(len(lineMatches)))
+		}
 	}
 
 	result.Status = "up"
+	if result.ResponseTimeMS <= 0 {
+		result.ResponseTimeMS = 1
+	}
 }
 
 func (w *Worker) enrichWithGeo(result *CheckResult, ip string) {
