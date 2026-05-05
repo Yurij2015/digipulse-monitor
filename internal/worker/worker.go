@@ -1,9 +1,9 @@
 package worker
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -72,6 +72,9 @@ func NewWorker(cfg *config.Config) *Worker {
 
 func (w *Worker) Start(ctx context.Context) {
 	log.Printf("Starting Redis worker (Queue mode) on key: %s", w.cfg.Redis.ChannelName)
+	if w.cfg.Connectivity.InternetCheckEnabled {
+		log.Printf("Outbound internet check enabled (probe: %s)", w.cfg.Connectivity.InternetProbeURL)
+	}
 
 	for {
 		select {
@@ -79,8 +82,27 @@ func (w *Worker) Start(ctx context.Context) {
 			log.Println("Worker shutting down...")
 			return
 		default:
-			// BRPOP returns [key, value]
-			res, err := w.redis.BRPop(ctx, 0, w.cfg.Redis.ChannelName).Result()
+			if w.cfg.Connectivity.InternetCheckEnabled && !w.outboundInternetReachable(ctx) {
+				log.Printf("No outbound internet (probe %s); not dequeuing tasks. Retrying in %v...",
+					w.cfg.Connectivity.InternetProbeURL, w.cfg.Connectivity.OfflineWait)
+				if !w.sleepOrDone(ctx, w.cfg.Connectivity.OfflineWait) {
+					return
+				}
+
+				continue
+			}
+
+			brPopBlock := w.cfg.Connectivity.RedisBRPopBlock
+			if !w.cfg.Connectivity.InternetCheckEnabled {
+				brPopBlock = 0
+			}
+
+			// BRPOP returns [key, value]. Non-zero block re-runs the internet probe when the queue is idle.
+			res, err := w.redis.BRPop(ctx, brPopBlock, w.cfg.Redis.ChannelName).Result()
+			if errors.Is(err, redis.Nil) {
+				continue
+			}
+
 			if err != nil {
 				if err != ctx.Err() {
 					log.Printf("Error popping task: %v", err)
@@ -98,9 +120,49 @@ func (w *Worker) Start(ctx context.Context) {
 				continue
 			}
 
-			// Run check in a goroutine
 			go w.processTask(task)
 		}
+	}
+}
+
+func (w *Worker) outboundInternetReachable(ctx context.Context) bool {
+	if !w.cfg.Connectivity.InternetCheckEnabled {
+		return true
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, w.cfg.Connectivity.ProbeTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, w.cfg.Connectivity.InternetProbeURL, nil)
+	if err != nil {
+		return false
+	}
+
+	req.Header.Set("User-Agent", "DigiPulse-Monitor/Connectivity-Probe")
+
+	client := &http.Client{Timeout: w.cfg.Connectivity.ProbeTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+
+	defer func(Body io.ReadCloser) {
+		_, _ = io.Copy(io.Discard, Body)
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Error closing connectivity probe body: %v", err)
+		}
+	}(resp.Body)
+
+	return resp.StatusCode < http.StatusInternalServerError
+}
+
+func (w *Worker) sleepOrDone(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
 	}
 }
 
@@ -390,32 +452,12 @@ func (w *Worker) reportResult(result CheckResult) {
 		return
 	}
 
-	url := fmt.Sprintf("%s/results", w.cfg.Backend.BaseURL)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
+	// Report via Redis LPush to the results queue
+	err = w.redis.LPush(context.Background(), w.cfg.Redis.ResultsChannel, payload).Err()
 	if err != nil {
-		log.Printf("Error creating report request: %v", err)
+		log.Printf("Error reporting result to Redis queue [%s]: %v", w.cfg.Redis.ResultsChannel, err)
 		return
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Monitor-Key", w.cfg.Backend.Key)
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("Error reporting result: %v", err)
-		return
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Printf("Error closing response body: %v", err)
-		}
-	}(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Backend reported error status: %d", resp.StatusCode)
-	} else {
-		log.Printf("Successfully reported result for Config ID: %d (Status: %s)", result.ConfigurationID, result.Status)
-	}
+	log.Printf("Successfully reported result to Redis queue [%s] for Config ID: %d (Status: %s)", w.cfg.Redis.ResultsChannel, result.ConfigurationID, result.Status)
 }

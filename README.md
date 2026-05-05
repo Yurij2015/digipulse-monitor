@@ -46,6 +46,11 @@ Deployments are automated via **GitHub Actions**.
 | `REDIS_ADDR` | `localhost:6379` | Redis connection address. |
 | `BACKEND_URL` | - | Webhook endpoint of the Laravel API. |
 | `MONITOR_API_KEY` | - | Shared secret for verification. |
+| `INTERNET_CHECK_ENABLED` | `true` | When `true`, the worker probes outbound internet before `BRPOP` and while the queue is idle; set `false` for intranet-only workers. |
+| `INTERNET_PROBE_URL` | `https://www.cloudflare.com` | URL used for the connectivity probe (`GET`, short timeout). |
+| `INTERNET_PROBE_TIMEOUT_SEC` | `5` | Timeout for a single probe request. |
+| `INTERNET_OFFLINE_WAIT_SEC` | `10` | Sleep between probe retries when the network is down. |
+| `REDIS_BRPOP_TIMEOUT_SEC` | `30` | `BRPOP` block duration when internet check is enabled (re-probes when the queue is empty). Ignored when `INTERNET_CHECK_ENABLED=false`. |
 
 ## Performance
 

@@ -3,14 +3,26 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
+	"time"
 )
 
 // Config holds all configuration for the application
 type Config struct {
-	Server  ServerConfig
-	Log     LogConfig
-	Redis   RedisConfig
-	Backend BackendConfig
+	Server       ServerConfig
+	Log          LogConfig
+	Redis        RedisConfig
+	Backend      BackendConfig
+	Connectivity ConnectivityConfig
+}
+
+// ConnectivityConfig controls pre-flight checks before dequeuing monitor tasks.
+type ConnectivityConfig struct {
+	InternetCheckEnabled bool
+	InternetProbeURL     string
+	ProbeTimeout         time.Duration
+	OfflineWait          time.Duration
+	RedisBRPopBlock      time.Duration
 }
 
 type RedisConfig struct {
@@ -18,6 +30,7 @@ type RedisConfig struct {
 	Password    string
 	DB          int
 	ChannelName string
+	ResultsChannel string
 }
 
 type BackendConfig struct {
@@ -40,6 +53,12 @@ type LogConfig struct {
 
 // Load reads configuration from environment variables
 func Load() *Config {
+	internetCheckEnabled := getEnvBool("INTERNET_CHECK_ENABLED", true)
+	redisBRPopBlock := time.Duration(getEnvAsInt("REDIS_BRPOP_TIMEOUT_SEC", 30)) * time.Second
+	if internetCheckEnabled && redisBRPopBlock <= 0 {
+		redisBRPopBlock = 30 * time.Second
+	}
+
 	return &Config{
 		Server: ServerConfig{
 			Port:         getEnv("PORT", "8080"),
@@ -55,10 +74,18 @@ func Load() *Config {
 			Password:    getEnv("REDIS_PASSWORD", ""),
 			DB:          getEnvAsInt("REDIS_DB", 0),
 			ChannelName: getEnv("MONITOR_REDIS_CHANNEL", "monitoring:tasks"),
+			ResultsChannel: getEnv("MONITOR_RESULTS_CHANNEL", "monitoring:results"),
 		},
 		Backend: BackendConfig{
 			BaseURL: getEnv("BACKEND_URL", "http://localhost:8000/api/webhooks"),
 			Key:     getEnv("MONITOR_API_KEY", ""),
+		},
+		Connectivity: ConnectivityConfig{
+			InternetCheckEnabled: internetCheckEnabled,
+			InternetProbeURL:     getEnv("INTERNET_PROBE_URL", "https://www.cloudflare.com"),
+			ProbeTimeout:         time.Duration(getEnvAsInt("INTERNET_PROBE_TIMEOUT_SEC", 5)) * time.Second,
+			OfflineWait:          time.Duration(getEnvAsInt("INTERNET_OFFLINE_WAIT_SEC", 10)) * time.Second,
+			RedisBRPopBlock:      redisBRPopBlock,
 		},
 	}
 }
@@ -77,4 +104,20 @@ func getEnvAsInt(key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return defaultValue
+	}
+
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
 }

@@ -105,8 +105,16 @@ jobs:
             REDIS_PASSWORD=
             REDIS_DB=0
             MONITOR_REDIS_CHANNEL=laravel-database-monitoring:tasks
+            MONITOR_RESULTS_CHANNEL=laravel-database-monitoring:results
             BACKEND_URL=http://digipulse-app:8000/api/webhooks
             MONITOR_API_KEY=${{ vars.INTERNAL_MONITOR_KEY }}
+
+            # Connectivity
+            INTERNET_CHECK_ENABLED=true
+            INTERNET_PROBE_URL=https://www.cloudflare.com
+            INTERNET_PROBE_TIMEOUT_SEC=5
+            INTERNET_OFFLINE_WAIT_SEC=10
+            REDIS_BRPOP_TIMEOUT_SEC=30
             ENVEOF
 
       - name: Restart Monitor Container
