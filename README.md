@@ -1,6 +1,6 @@
 # DigiPulse Monitor (Go Service)
 
-Ultra-fast, event-driven site monitoring service built in Go. This service handles the actual website reachability checks and reports results back to the Laravel backend.
+Ultra-fast, event-driven site monitoring service built in Go. This service handles the actual website reachability checks and reports results back to the Laravel backend via Redis queues.
 
 ## Technology Stack
 
@@ -10,9 +10,9 @@ Ultra-fast, event-driven site monitoring service built in Go. This service handl
 
 ## Architecture
 
-1.  **Job Acquisition**: Listens to a Redis channel for check tasks dispatched by the Laravel Scheduler.
+1.  **Job Acquisition**: Reads check tasks from a Redis queue dispatched by the Laravel Scheduler.
 2.  **Concurrency**: Uses Go routines to perform multiple checks (HTTP, SSL, Ping) simultaneously.
-3.  **Reporting**: Sends results to the Backend API via authenticated webhooks.
+3.  **Reporting**: Pushes check results to a Redis results queue consumed by Laravel (`app:consume-monitor-results`).
 
 ## Deployment (CI/CD)
 
@@ -30,7 +30,6 @@ Deployments are automated via **GitHub Actions**.
 |---|---|
 | `SSH_KEY` | Private SSH key for the Hetzner server. |
 | `REDIS_HOST` | Redis host (usually `digipulse-redis`). |
-| `INTERNAL_MONITOR_KEY` | Shared secret for the Backend API. |
 
 ## Local Development
 
@@ -44,8 +43,8 @@ Deployments are automated via **GitHub Actions**.
 |---|---|---|
 | `PORT` | 8080 | Local API port. |
 | `REDIS_ADDR` | `localhost:6379` | Redis connection address. |
-| `BACKEND_URL` | - | Webhook endpoint of the Laravel API. |
-| `MONITOR_API_KEY` | - | Shared secret for verification. |
+| `MONITOR_REDIS_CHANNEL` | `monitoring:tasks` | Redis queue with pending check tasks. |
+| `MONITOR_RESULTS_CHANNEL` | `monitoring:results` | Redis queue where processed check results are pushed. |
 | `INTERNET_CHECK_ENABLED` | `true` | When `true`, the worker probes outbound internet before `BRPOP` and while the queue is idle; set `false` for intranet-only workers. |
 | `INTERNET_PROBE_URL` | `https://www.cloudflare.com` | URL used for the connectivity probe (`GET`, short timeout). |
 | `INTERNET_PROBE_TIMEOUT_SEC` | `5` | Timeout for a single probe request. |

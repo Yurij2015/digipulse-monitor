@@ -12,7 +12,6 @@ type Config struct {
 	Server       ServerConfig
 	Log          LogConfig
 	Redis        RedisConfig
-	Backend      BackendConfig
 	Connectivity ConnectivityConfig
 }
 
@@ -26,16 +25,11 @@ type ConnectivityConfig struct {
 }
 
 type RedisConfig struct {
-	Addr        string
-	Password    string
-	DB          int
-	ChannelName string
+	Addr           string
+	Password       string
+	DB             int
+	ChannelName    string
 	ResultsChannel string
-}
-
-type BackendConfig struct {
-	BaseURL string
-	Key     string
 }
 
 // ServerConfig holds server-related configuration
@@ -70,15 +64,11 @@ func Load() *Config {
 			Format: getEnv("LOG_FORMAT", "json"),
 		},
 		Redis: RedisConfig{
-			Addr:        getEnv("REDIS_ADDR", "localhost:6379"),
-			Password:    getEnv("REDIS_PASSWORD", ""),
-			DB:          getEnvAsInt("REDIS_DB", 0),
-			ChannelName: getEnv("MONITOR_REDIS_CHANNEL", "monitoring:tasks"),
+			Addr:           getEnv("REDIS_ADDR", "localhost:6379"),
+			Password:       getEnv("REDIS_PASSWORD", ""),
+			DB:             getEnvAsInt("REDIS_DB", 0),
+			ChannelName:    getEnv("MONITOR_REDIS_CHANNEL", "monitoring:tasks"),
 			ResultsChannel: getEnv("MONITOR_RESULTS_CHANNEL", "monitoring:results"),
-		},
-		Backend: BackendConfig{
-			BaseURL: getEnv("BACKEND_URL", "http://localhost:8000/api/webhooks"),
-			Key:     getEnv("MONITOR_API_KEY", ""),
 		},
 		Connectivity: ConnectivityConfig{
 			InternetCheckEnabled: internetCheckEnabled,

@@ -106,8 +106,6 @@ jobs:
             REDIS_DB=0
             MONITOR_REDIS_CHANNEL=laravel-database-monitoring:tasks
             MONITOR_RESULTS_CHANNEL=laravel-database-monitoring:results
-            BACKEND_URL=http://digipulse-app:8000/api/webhooks
-            MONITOR_API_KEY=${{ vars.INTERNAL_MONITOR_KEY }}
 
             # Connectivity
             INTERNET_CHECK_ENABLED=true
