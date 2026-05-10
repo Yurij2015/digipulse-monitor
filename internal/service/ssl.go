@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -47,13 +48,25 @@ func (s *SSLService) GetInfo(url string) (*SSLInfo, error) {
 		host = host[:idx]
 	}
 
-	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", host+":443", nil)
+	// InsecureSkipVerify is intentional: we need to connect even to expired or
+	// self-signed certs so we can inspect and report the certificate details.
+	conn, err := tls.DialWithDialer(
+		&net.Dialer{Timeout: 5 * time.Second},
+		"tcp",
+		host+":443",
+		&tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
 
-	cert := conn.ConnectionState().PeerCertificates[0]
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return nil, fmt.Errorf("no certificates presented by server")
+	}
+
+	cert := certs[0]
 	daysRemaining := int(time.Until(cert.NotAfter).Hours() / 24)
 
 	info := SSLInfo{

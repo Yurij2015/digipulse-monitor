@@ -22,6 +22,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// slowThresholdMS is the response time above which a successful check is reported as "slow".
+const slowThresholdMS = 3000
+
 type CheckTask struct {
 	ID              string      `json:"id"`
 	ConfigurationID uint        `json:"configuration_id"`
@@ -250,9 +253,14 @@ func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
 		}
 	}(resp.Body)
 
-	if resp.StatusCode < 500 {
-		result.Status = "up"
-	} else {
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 400:
+		if result.ResponseTimeMS >= slowThresholdMS {
+			result.Status = "slow"
+		} else {
+			result.Status = "up"
+		}
+	default:
 		result.Status = "down"
 		result.ErrorMessage = fmt.Sprintf("HTTP Status: %d", resp.StatusCode)
 	}
@@ -389,8 +397,11 @@ func (w *Worker) checkPing(task *CheckTask, result *CheckResult) {
 		w.enrichWithGeo(result, ips[0].String())
 	}
 
-	// Use system ping command
-	cmd := exec.Command("ping", "-c", "4", "-W", "2", host)
+	// Use system ping command with a hard deadline so the goroutine can't hang.
+	pingCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(pingCtx, "ping", "-c", "4", "-W", "2", host)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		result.Status = "down"
@@ -452,8 +463,10 @@ func (w *Worker) reportResult(result CheckResult) {
 		return
 	}
 
-	// Report via Redis LPush to the results queue
-	err = w.redis.LPush(context.Background(), w.cfg.Redis.ResultsChannel, payload).Err()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = w.redis.LPush(ctx, w.cfg.Redis.ResultsChannel, payload).Err()
 	if err != nil {
 		log.Printf("Error reporting result to Redis queue [%s]: %v", w.cfg.Redis.ResultsChannel, err)
 		return
