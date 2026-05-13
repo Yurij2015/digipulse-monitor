@@ -22,7 +22,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// slowThresholdMS is the response time above which a successful check is reported as "slow".
 const slowThresholdMS = 3000
 
 type CheckTask struct {
@@ -46,7 +45,7 @@ func (t *CheckTask) GetParamsMap() map[string]interface{} {
 type CheckResult struct {
 	ConfigurationID uint                   `json:"configuration_id"`
 	Status          string                 `json:"status"`
-	ResponseTimeMS  int64                  `json:"response_time_ms"`
+	ResponseTimeMS  *int64                 `json:"response_time_ms,omitempty"`
 	ErrorMessage    string                 `json:"error_message,omitempty"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -170,7 +169,6 @@ func (w *Worker) sleepOrDone(ctx context.Context, d time.Duration) bool {
 }
 
 func (w *Worker) processTask(task CheckTask) {
-	// Expiration check: (update_interval * 2) - 1
 	if task.ScheduledAt != "" && task.UpdateInterval > 0 {
 		scheduledTime, err := time.Parse(time.RFC3339, task.ScheduledAt)
 		if err == nil {
@@ -205,8 +203,10 @@ func (w *Worker) processTask(task CheckTask) {
 
 	// If the check was successful but took less than 1ms (e.g. local loopback),
 	// record it as 1ms instead of 0ms so it doesn't look like an error.
-	if result.Status == "up" && result.ResponseTimeMS <= 0 {
-		result.ResponseTimeMS = 1
+	// SSL cache hits omit response_time_ms entirely.
+	if result.Status == "up" && result.ResponseTimeMS != nil && *result.ResponseTimeMS <= 0 {
+		one := int64(1)
+		result.ResponseTimeMS = &one
 	}
 
 	w.reportResult(result)
@@ -237,7 +237,8 @@ func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
 	req.Header.Set("Accept", "*/*")
 
 	resp, err := client.Do(req)
-	result.ResponseTimeMS = time.Since(start).Milliseconds()
+	ms := time.Since(start).Milliseconds()
+	result.ResponseTimeMS = &ms
 
 	w.enrichWithGeo(result, remoteIP)
 
@@ -255,7 +256,7 @@ func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
 
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 400:
-		if result.ResponseTimeMS >= slowThresholdMS {
+		if *result.ResponseTimeMS >= slowThresholdMS {
 			result.Status = "slow"
 		} else {
 			result.Status = "up"
@@ -267,10 +268,8 @@ func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
 }
 
 func (w *Worker) checkSSL(task *CheckTask, result *CheckResult) {
-	start := time.Now()
-
-	info, err := w.ssl.GetInfo(task.URL)
-	result.ResponseTimeMS = time.Since(start).Milliseconds()
+	info, probeMs, err := w.ssl.GetInfo(task.URL)
+	result.ResponseTimeMS = probeMs
 
 	if err != nil {
 		result.Status = "down"
@@ -279,40 +278,26 @@ func (w *Worker) checkSSL(task *CheckTask, result *CheckResult) {
 	}
 
 	result.Status = "up"
-	result.Metadata = map[string]interface{}{
+	md := map[string]interface{}{
 		"issuer":         info.Issuer,
 		"days_remaining": info.DaysRemaining,
 		"expires_at":     info.ExpiresAt.Format(time.RFC3339),
 	}
-
-	// Also try to get IP for Geo info
-	host := task.URL
-	if strings.HasPrefix(host, "http://") {
-		host = strings.Replace(host, "http://", "", 1)
-	} else if strings.HasPrefix(host, "https://") {
-		host = strings.Replace(host, "https://", "", 1)
+	if probeMs == nil {
+		md["ssl_cert_from_cache"] = true
 	}
-	if idx := strings.Index(host, "/"); idx != -1 {
-		host = host[:idx]
-	}
+	result.Metadata = md
 
-	if ips, err := net.LookupIP(host); err == nil && len(ips) > 0 {
+	if ips, err := net.LookupIP(extractHost(task.URL)); err == nil && len(ips) > 0 {
 		w.enrichWithGeo(result, ips[0].String())
 	}
 }
 
 func (w *Worker) checkDNS(task *CheckTask, result *CheckResult) {
 	start := time.Now()
-	host := task.URL
-	if idx := strings.Index(host, "://"); idx != -1 {
-		host = host[idx+3:]
-	}
-	if idx := strings.Index(host, "/"); idx != -1 {
-		host = host[:idx]
-	}
-
-	ips, err := net.LookupIP(host)
-	result.ResponseTimeMS = time.Since(start).Milliseconds()
+	ips, err := net.LookupIP(extractHost(task.URL))
+	ms := time.Since(start).Milliseconds()
+	result.ResponseTimeMS = &ms
 
 	if err != nil || len(ips) == 0 {
 		result.Status = "down"
@@ -333,9 +318,7 @@ func (w *Worker) checkDNS(task *CheckTask, result *CheckResult) {
 		"ips": ipStrs,
 	}
 
-	if len(ips) > 0 {
-		w.enrichWithGeo(result, ips[0].String())
-	}
+	w.enrichWithGeo(result, ips[0].String())
 }
 
 func (w *Worker) checkPort(task *CheckTask, result *CheckResult) {
@@ -350,17 +333,12 @@ func (w *Worker) checkPort(task *CheckTask, result *CheckResult) {
 		}
 	}
 
-	host := task.URL
-	if idx := strings.Index(host, "://"); idx != -1 {
-		host = host[idx+3:]
-	}
-	if idx := strings.Index(host, "/"); idx != -1 {
-		host = host[:idx]
-	}
+	host := extractHost(task.URL)
 
 	start := time.Now()
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, portStr), 5*time.Second)
-	result.ResponseTimeMS = time.Since(start).Milliseconds()
+	ms := time.Since(start).Milliseconds()
+	result.ResponseTimeMS = &ms
 
 	if err != nil {
 		result.Status = "down"
@@ -382,17 +360,8 @@ func (w *Worker) checkPort(task *CheckTask, result *CheckResult) {
 }
 
 func (w *Worker) checkPing(task *CheckTask, result *CheckResult) {
-	host := task.URL
-	if strings.HasPrefix(host, "http://") {
-		host = strings.Replace(host, "http://", "", 1)
-	} else if strings.HasPrefix(host, "https://") {
-		host = strings.Replace(host, "https://", "", 1)
-	}
-	if idx := strings.Index(host, "/"); idx != -1 {
-		host = host[:idx]
-	}
+	host := extractHost(task.URL)
 
-	// Resolve IP for Geo info
 	if ips, err := net.LookupIP(host); err == nil && len(ips) > 0 {
 		w.enrichWithGeo(result, ips[0].String())
 	}
@@ -409,7 +378,6 @@ func (w *Worker) checkPing(task *CheckTask, result *CheckResult) {
 		return
 	}
 
-	// Parse ping output for average RTT
 	// 1. Try to find the summary line (min/avg/max)
 	summaryRe := regexp.MustCompile(`[\d.,]+/([\d.,]+)/[\d.,]+`)
 	summaryMatches := summaryRe.FindStringSubmatch(string(output))
@@ -417,7 +385,8 @@ func (w *Worker) checkPing(task *CheckTask, result *CheckResult) {
 	if len(summaryMatches) > 1 {
 		avgStr := strings.Replace(summaryMatches[1], ",", ".", 1)
 		avg, _ := strconv.ParseFloat(avgStr, 64)
-		result.ResponseTimeMS = int64(avg)
+		v := int64(avg)
+		result.ResponseTimeMS = &v
 	} else {
 		// 2. Fallback: Parse individual lines for "time=X ms" and average them
 		lineRe := regexp.MustCompile(`time=([\d.,]+)`)
@@ -429,13 +398,15 @@ func (w *Worker) checkPing(task *CheckTask, result *CheckResult) {
 				val, _ := strconv.ParseFloat(valStr, 64)
 				total += val
 			}
-			result.ResponseTimeMS = int64(total / float64(len(lineMatches)))
+			v := int64(total / float64(len(lineMatches)))
+			result.ResponseTimeMS = &v
 		}
 	}
 
 	result.Status = "up"
-	if result.ResponseTimeMS <= 0 {
-		result.ResponseTimeMS = 1
+	if result.ResponseTimeMS == nil || *result.ResponseTimeMS <= 0 {
+		one := int64(1)
+		result.ResponseTimeMS = &one
 	}
 }
 
@@ -454,6 +425,16 @@ func (w *Worker) enrichWithGeo(result *CheckResult, ip string) {
 		result.Metadata["isp"] = geo.ISP
 		result.Metadata["org"] = geo.Org
 	}
+}
+
+func extractHost(rawURL string) string {
+	if idx := strings.Index(rawURL, "://"); idx != -1 {
+		rawURL = rawURL[idx+3:]
+	}
+	if idx := strings.Index(rawURL, "/"); idx != -1 {
+		rawURL = rawURL[:idx]
+	}
+	return rawURL
 }
 
 func (w *Worker) reportResult(result CheckResult) {

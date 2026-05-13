@@ -9,61 +9,60 @@ import (
 	"time"
 )
 
+const sslCertCacheTTL = 24 * time.Hour
+
 type SSLInfo struct {
 	Issuer        string    `json:"issuer"`
 	DaysRemaining int       `json:"days_remaining"`
 	ExpiresAt     time.Time `json:"expires_at"`
-	LastChecked   time.Time `json:"last_checked"`
+}
+
+type sslCachedEntry struct {
+	info     SSLInfo
+	cachedAt time.Time
 }
 
 type SSLService struct {
-	cache map[string]SSLInfo
 	mu    sync.RWMutex
+	cache map[string]sslCachedEntry
 }
 
 func NewSSLService() *SSLService {
 	return &SSLService{
-		cache: make(map[string]SSLInfo),
+		cache: make(map[string]sslCachedEntry),
 	}
 }
 
-func (s *SSLService) GetInfo(url string) (*SSLInfo, error) {
+func (s *SSLService) GetInfo(url string) (*SSLInfo, *int64, error) {
+	normalized := normalizeSSLURL(url)
+
 	s.mu.RLock()
-	cached, ok := s.cache[url]
+	entry, ok := s.cache[normalized]
 	s.mu.RUnlock()
 
-	// Cache for 24 hours
-	if ok && time.Since(cached.LastChecked) < 24*time.Hour {
-		return &cached, nil
+	if ok && time.Since(entry.cachedAt) < sslCertCacheTTL {
+		info := entry.info
+		return &info, nil, nil
 	}
 
-	host := url
-	if strings.HasPrefix(host, "http://") {
-		host = strings.Replace(host, "http://", "", 1)
-	} else if strings.HasPrefix(host, "https://") {
-		host = strings.Replace(host, "https://", "", 1)
-	}
-
-	if idx := strings.Index(host, "/"); idx != -1 {
-		host = host[:idx]
-	}
-
-	// InsecureSkipVerify is intentional: we need to connect even to expired or
-	// self-signed certs so we can inspect and report the certificate details.
+	start := time.Now()
 	conn, err := tls.DialWithDialer(
 		&net.Dialer{Timeout: 5 * time.Second},
 		"tcp",
-		host+":443",
+		normalized+":443",
 		&tls.Config{InsecureSkipVerify: true}, //nolint:gosec
 	)
+	probeMs := time.Since(start).Milliseconds()
+	probePtr := &probeMs
+
 	if err != nil {
-		return nil, err
+		return nil, probePtr, err
 	}
 	defer conn.Close()
 
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) == 0 {
-		return nil, fmt.Errorf("no certificates presented by server")
+		return nil, probePtr, fmt.Errorf("no certificates presented by server")
 	}
 
 	cert := certs[0]
@@ -73,12 +72,24 @@ func (s *SSLService) GetInfo(url string) (*SSLInfo, error) {
 		Issuer:        cert.Issuer.CommonName,
 		DaysRemaining: daysRemaining,
 		ExpiresAt:     cert.NotAfter,
-		LastChecked:   time.Now(),
 	}
 
 	s.mu.Lock()
-	s.cache[url] = info
+	s.cache[normalized] = sslCachedEntry{info: info, cachedAt: time.Now()}
 	s.mu.Unlock()
 
-	return &info, nil
+	return &info, probePtr, nil
+}
+
+func normalizeSSLURL(url string) string {
+	h := url
+	if strings.HasPrefix(h, "http://") {
+		h = strings.Replace(h, "http://", "", 1)
+	} else if strings.HasPrefix(h, "https://") {
+		h = strings.Replace(h, "https://", "", 1)
+	}
+	if idx := strings.Index(h, "/"); idx != -1 {
+		h = h[:idx]
+	}
+	return h
 }
