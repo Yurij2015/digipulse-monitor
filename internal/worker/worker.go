@@ -99,6 +99,8 @@ func (w *Worker) Start(ctx context.Context) {
 				brPopBlock = 0
 			}
 
+			w.sendHeartbeat(ctx)
+
 			// BRPOP returns [key, value]. Non-zero block re-runs the internet probe when the queue is idle.
 			res, err := w.redis.BRPop(ctx, brPopBlock, w.cfg.Redis.ChannelName).Result()
 			if errors.Is(err, redis.Nil) {
@@ -454,4 +456,12 @@ func (w *Worker) reportResult(result CheckResult) {
 	}
 
 	log.Printf("Successfully reported result to Redis queue [%s] for Config ID: %d (Status: %s)", w.cfg.Redis.ResultsChannel, result.ConfigurationID, result.Status)
+}
+
+func (w *Worker) sendHeartbeat(ctx context.Context) {
+	hbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := w.redis.Set(hbCtx, "go_monitor:last_heartbeat", time.Now().Unix(), 10*time.Minute).Err(); err != nil {
+		log.Printf("Failed to send heartbeat: %v", err)
+	}
 }
