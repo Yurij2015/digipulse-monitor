@@ -80,13 +80,14 @@ func TestCheckPing_successWithMock(t *testing.T) {
 	}
 	w := &Worker{pingRunner: mock}
 
-	task := &CheckTask{URL: "https://example.com"}
+	// Reserved TLD: no DNS lookup side effects in unit tests.
+	task := &CheckTask{URL: "https://target.invalid"}
 	result := &CheckResult{}
 
 	w.checkPing(task, result)
 
-	if mock.host != "example.com" {
-		t.Fatalf("expected ping host example.com, got %q", mock.host)
+	if mock.host != "target.invalid" {
+		t.Fatalf("expected ping host target.invalid, got %q", mock.host)
 	}
 	if result.Status != "up" {
 		t.Fatalf("expected status up, got %q (error=%q)", result.Status, result.ErrorMessage)
@@ -100,11 +101,14 @@ func TestCheckPing_failureWithMock(t *testing.T) {
 	mock := &mockPingRunner{err: errors.New("exit status 1")}
 	w := &Worker{pingRunner: mock}
 
-	task := &CheckTask{URL: "example.com"}
+	task := &CheckTask{URL: "https://target.invalid"}
 	result := &CheckResult{}
 
 	w.checkPing(task, result)
 
+	if mock.host != "target.invalid" {
+		t.Fatalf("expected ping host target.invalid, got %q", mock.host)
+	}
 	if result.Status != "down" {
 		t.Fatalf("expected status down, got %q", result.Status)
 	}

@@ -386,6 +386,9 @@ func (w *Worker) enrichWithGeo(result *CheckResult, ip string) {
 		result.Metadata = make(map[string]interface{})
 	}
 	result.Metadata["ip"] = ip
+	if w.geo == nil {
+		return
+	}
 	if geo, err := w.geo.GetInfo(ip); err == nil {
 		result.Metadata["country"] = geo.Country
 		result.Metadata["country_code"] = geo.CountryCode
