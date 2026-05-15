@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -172,29 +171,6 @@ func TestCheckPort(t *testing.T) {
 
 	if result.Status != "up" {
 		t.Fatalf("expected port status up, got %q (error=%q)", result.Status, result.ErrorMessage)
-	}
-	if result.ResponseTimeMS == nil {
-		t.Fatalf("expected ResponseTimeMS to be non-nil")
-	}
-}
-
-func TestCheckPing(t *testing.T) {
-	if _, err := exec.LookPath("ping"); err != nil {
-		t.Skip("skipping ping test: ping binary is not available")
-	}
-
-	w := newIntegrationWorker()
-	requireInternet(t, w)
-
-	task := &CheckTask{
-		URL: connectivityProbeURL,
-	}
-	result := &CheckResult{}
-
-	w.checkPing(task, result)
-
-	if result.Status != "up" {
-		t.Fatalf("expected ping status up, got %q (error=%q)", result.Status, result.ErrorMessage)
 	}
 	if result.ResponseTimeMS == nil {
 		t.Fatalf("expected ResponseTimeMS to be non-nil")

@@ -10,8 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
-	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -51,10 +49,11 @@ type CheckResult struct {
 }
 
 type Worker struct {
-	cfg   *config.Config
-	redis *redis.Client
-	geo   *service.GeoIPService
-	ssl   *service.SSLService
+	cfg        *config.Config
+	redis      *redis.Client
+	geo        *service.GeoIPService
+	ssl        *service.SSLService
+	pingRunner PingRunner
 }
 
 func NewWorker(cfg *config.Config) *Worker {
@@ -65,10 +64,11 @@ func NewWorker(cfg *config.Config) *Worker {
 	})
 
 	return &Worker{
-		cfg:   cfg,
-		redis: rdb,
-		geo:   service.NewGeoIPService(),
-		ssl:   service.NewSSLService(),
+		cfg:        cfg,
+		redis:      rdb,
+		geo:        service.NewGeoIPService(),
+		ssl:        service.NewSSLService(),
+		pingRunner: ExecPingRunner{},
 	}
 }
 
@@ -84,6 +84,9 @@ func (w *Worker) Start(ctx context.Context) {
 			log.Println("Worker shutting down...")
 			return
 		default:
+			// Heartbeat = worker process is alive and Redis is reachable (not outbound internet).
+			w.sendHeartbeat(ctx)
+
 			if w.cfg.Connectivity.InternetCheckEnabled && !w.outboundInternetReachable(ctx) {
 				log.Printf("No outbound internet (probe %s); not dequeuing tasks. Retrying in %v...",
 					w.cfg.Connectivity.InternetProbeURL, w.cfg.Connectivity.OfflineWait)
@@ -98,8 +101,6 @@ func (w *Worker) Start(ctx context.Context) {
 			if !w.cfg.Connectivity.InternetCheckEnabled {
 				brPopBlock = 0
 			}
-
-			w.sendHeartbeat(ctx)
 
 			// BRPOP returns [key, value]. Non-zero block re-runs the internet probe when the queue is idle.
 			res, err := w.redis.BRPop(ctx, brPopBlock, w.cfg.Redis.ChannelName).Result()
@@ -368,48 +369,13 @@ func (w *Worker) checkPing(task *CheckTask, result *CheckResult) {
 		w.enrichWithGeo(result, ips[0].String())
 	}
 
-	// Use system ping command with a hard deadline so the goroutine can't hang.
-	pingCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(pingCtx, "ping", "-c", "4", "-W", "2", host)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		result.Status = "down"
-		result.ErrorMessage = "Ping failed: " + err.Error()
-		return
+	runner := w.pingRunner
+	if runner == nil {
+		runner = ExecPingRunner{}
 	}
 
-	// 1. Try to find the summary line (min/avg/max)
-	summaryRe := regexp.MustCompile(`[\d.,]+/([\d.,]+)/[\d.,]+`)
-	summaryMatches := summaryRe.FindStringSubmatch(string(output))
-
-	if len(summaryMatches) > 1 {
-		avgStr := strings.Replace(summaryMatches[1], ",", ".", 1)
-		avg, _ := strconv.ParseFloat(avgStr, 64)
-		v := int64(avg)
-		result.ResponseTimeMS = &v
-	} else {
-		// 2. Fallback: Parse individual lines for "time=X ms" and average them
-		lineRe := regexp.MustCompile(`time=([\d.,]+)`)
-		lineMatches := lineRe.FindAllStringSubmatch(string(output), -1)
-		if len(lineMatches) > 0 {
-			var total float64
-			for _, m := range lineMatches {
-				valStr := strings.Replace(m[1], ",", ".", 1)
-				val, _ := strconv.ParseFloat(valStr, 64)
-				total += val
-			}
-			v := int64(total / float64(len(lineMatches)))
-			result.ResponseTimeMS = &v
-		}
-	}
-
-	result.Status = "up"
-	if result.ResponseTimeMS == nil || *result.ResponseTimeMS <= 0 {
-		one := int64(1)
-		result.ResponseTimeMS = &one
-	}
+	output, err := runner.Run(context.Background(), host)
+	applyPingOutput(result, output, err)
 }
 
 func (w *Worker) enrichWithGeo(result *CheckResult, ip string) {

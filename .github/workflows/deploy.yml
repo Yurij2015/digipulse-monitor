@@ -107,6 +107,7 @@ jobs:
             REDIS_ADDR=${{ vars.REDIS_HOST }}:6379
             REDIS_PASSWORD=
             REDIS_DB=0
+            REDIS_PREFIX=laravel-database-
             MONITOR_REDIS_CHANNEL=laravel-database-monitoring:tasks
             MONITOR_RESULTS_CHANNEL=laravel-database-monitoring:results
             MONITOR_HEARTBEAT_KEY=laravel-database-go_monitor:last_heartbeat

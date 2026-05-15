@@ -70,7 +70,7 @@ func Load() *Config {
 			DB:             getEnvAsInt("REDIS_DB", 0),
 			ChannelName:    getEnv("MONITOR_REDIS_CHANNEL", "monitoring:tasks"),
 			ResultsChannel: getEnv("MONITOR_RESULTS_CHANNEL", "monitoring:results"),
-			HeartbeatKey:   getEnv("MONITOR_HEARTBEAT_KEY", "go_monitor:last_heartbeat"),
+			HeartbeatKey:   resolveHeartbeatKey(),
 		},
 		Connectivity: ConnectivityConfig{
 			InternetCheckEnabled: internetCheckEnabled,
@@ -80,6 +80,15 @@ func Load() *Config {
 			RedisBRPopBlock:      redisBRPopBlock,
 		},
 	}
+}
+
+// resolveHeartbeatKey returns the full Redis key Laravel reads (with REDIS_PREFIX applied).
+func resolveHeartbeatKey() string {
+	if value, ok := os.LookupEnv("MONITOR_HEARTBEAT_KEY"); ok && strings.TrimSpace(value) != "" {
+		return value
+	}
+
+	return getEnv("REDIS_PREFIX", "") + "go_monitor:last_heartbeat"
 }
 
 func getEnv(key, defaultValue string) string {
