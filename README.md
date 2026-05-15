@@ -45,6 +45,7 @@ Deployments are automated via **GitHub Actions**.
 | `REDIS_ADDR` | `localhost:6379` | Redis connection address. |
 | `MONITOR_REDIS_CHANNEL` | `monitoring:tasks` | Redis queue with pending check tasks. |
 | `MONITOR_RESULTS_CHANNEL` | `monitoring:results` | Redis queue where processed check results are pushed. |
+| `MONITOR_HEARTBEAT_KEY` | `go_monitor:last_heartbeat` | Redis key for worker liveness (use full key with Laravel `REDIS_PREFIX` in production, e.g. `laravel-database-go_monitor:last_heartbeat`). |
 | `INTERNET_CHECK_ENABLED` | `true` | When `true`, the worker probes outbound internet before `BRPOP` and while the queue is idle; set `false` for intranet-only workers. |
 | `INTERNET_PROBE_URL` | `https://www.cloudflare.com` | URL used for the connectivity probe (`GET`, short timeout). |
 | `INTERNET_PROBE_TIMEOUT_SEC` | `5` | Timeout for a single probe request. |

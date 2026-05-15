@@ -30,6 +30,7 @@ type RedisConfig struct {
 	DB             int
 	ChannelName    string
 	ResultsChannel string
+	HeartbeatKey   string
 }
 
 // ServerConfig holds server-related configuration
@@ -69,6 +70,7 @@ func Load() *Config {
 			DB:             getEnvAsInt("REDIS_DB", 0),
 			ChannelName:    getEnv("MONITOR_REDIS_CHANNEL", "monitoring:tasks"),
 			ResultsChannel: getEnv("MONITOR_RESULTS_CHANNEL", "monitoring:results"),
+			HeartbeatKey:   getEnv("MONITOR_HEARTBEAT_KEY", "go_monitor:last_heartbeat"),
 		},
 		Connectivity: ConnectivityConfig{
 			InternetCheckEnabled: internetCheckEnabled,

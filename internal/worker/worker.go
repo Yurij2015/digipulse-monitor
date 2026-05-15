@@ -461,7 +461,7 @@ func (w *Worker) reportResult(result CheckResult) {
 func (w *Worker) sendHeartbeat(ctx context.Context) {
 	hbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if err := w.redis.Set(hbCtx, "go_monitor:last_heartbeat", time.Now().Unix(), 10*time.Minute).Err(); err != nil {
+	if err := w.redis.Set(hbCtx, w.cfg.Redis.HeartbeatKey, time.Now().Unix(), 10*time.Minute).Err(); err != nil {
 		log.Printf("Failed to send heartbeat: %v", err)
 	}
 }

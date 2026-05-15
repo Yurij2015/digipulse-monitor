@@ -109,6 +109,7 @@ jobs:
             REDIS_DB=0
             MONITOR_REDIS_CHANNEL=laravel-database-monitoring:tasks
             MONITOR_RESULTS_CHANNEL=laravel-database-monitoring:results
+            MONITOR_HEARTBEAT_KEY=laravel-database-go_monitor:last_heartbeat
 
             # Connectivity
             INTERNET_CHECK_ENABLED=true
