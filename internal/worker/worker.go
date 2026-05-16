@@ -74,6 +74,7 @@ func NewWorker(cfg *config.Config) *Worker {
 
 func (w *Worker) Start(ctx context.Context) {
 	log.Printf("Starting Redis worker (Queue mode) on key: %s", w.cfg.Redis.ChannelName)
+	log.Printf("Heartbeat Redis key: %s", w.cfg.Redis.HeartbeatKey)
 	if w.cfg.Connectivity.InternetCheckEnabled {
 		log.Printf("Outbound internet check enabled (probe: %s)", w.cfg.Connectivity.InternetProbeURL)
 	}
@@ -81,7 +82,7 @@ func (w *Worker) Start(ctx context.Context) {
 	// Start a dedicated heartbeat goroutine so it never blocks on BRPop
 	go func() {
 		w.sendHeartbeat(ctx) // Initial heartbeat
-		ticker := time.NewTicker(1 * time.Minute)
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
 		for {
@@ -444,7 +445,8 @@ func (w *Worker) reportResult(result CheckResult) {
 func (w *Worker) sendHeartbeat(ctx context.Context) {
 	hbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if err := w.redis.Set(hbCtx, w.cfg.Redis.HeartbeatKey, time.Now().Unix(), 10*time.Minute).Err(); err != nil {
+	value := strconv.FormatInt(time.Now().Unix(), 10)
+	if err := w.redis.Set(hbCtx, w.cfg.Redis.HeartbeatKey, value, 15*time.Minute).Err(); err != nil {
 		log.Printf("Failed to send heartbeat: %v", err)
 	}
 }
