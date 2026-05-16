@@ -1,0 +1,46 @@
+name: Export deploy matrix from repository variables
+description: Builds DEPLOYMENT_MATRIX JSON from DEPLOY_SERVER_* GitHub Variables (no committed config).
+
+outputs:
+  DEPLOYMENT_MATRIX:
+    description: JSON array for strategy.matrix.server
+    value: ${{ steps.export.outputs.DEPLOYMENT_MATRIX }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build matrix JSON
+      id: export
+      shell: bash
+      env:
+        DEPLOY_SERVER_NAME: ${{ vars.DEPLOY_SERVER_NAME }}
+        DEPLOY_SERVER_IP: ${{ vars.DEPLOY_SERVER_IP }}
+        DEPLOY_SERVER_PORT: ${{ vars.DEPLOY_SERVER_PORT }}
+        DEPLOY_SERVER_USERNAME: ${{ vars.DEPLOY_SERVER_USERNAME }}
+        DEPLOY_SERVER_PATH: ${{ vars.DEPLOY_SERVER_PATH }}
+      run: |
+        set -euo pipefail
+        missing=()
+        for key in DEPLOY_SERVER_NAME DEPLOY_SERVER_IP DEPLOY_SERVER_PORT DEPLOY_SERVER_USERNAME DEPLOY_SERVER_PATH; do
+          if [ -z "${!key:-}" ]; then
+            missing+=("$key")
+          fi
+        done
+        if [ "${#missing[@]}" -gt 0 ]; then
+          echo "Missing GitHub Variables: ${missing[*]}"
+          echo "Set them under Settings → Secrets and variables → Actions → Variables"
+          exit 1
+        fi
+        delimiter="$(openssl rand -hex 8)"
+        JSON="$(jq -n \
+          --arg name "$DEPLOY_SERVER_NAME" \
+          --arg ip "$DEPLOY_SERVER_IP" \
+          --arg port "$DEPLOY_SERVER_PORT" \
+          --arg username "$DEPLOY_SERVER_USERNAME" \
+          --arg path "$DEPLOY_SERVER_PATH" \
+          '[{name:$name,ip:$ip,port:$port,username:$username,path:$path}]')"
+        {
+          echo "DEPLOYMENT_MATRIX<<${delimiter}"
+          echo "$JSON"
+          echo "${delimiter}"
+        } >> "${GITHUB_OUTPUT}"

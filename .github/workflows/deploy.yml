@@ -43,12 +43,7 @@ jobs:
 
       - name: Export deployment matrix
         id: export-deployment-matrix
-        run: |
-          delimiter="$(openssl rand -hex 8)"
-          JSON="$(cat ./deployment-config.json)"
-          echo "DEPLOYMENT_MATRIX<<${delimiter}" >> "${GITHUB_OUTPUT}"
-          echo "$JSON" >> "${GITHUB_OUTPUT}"
-          echo "${delimiter}" >> "${GITHUB_OUTPUT}"
+        uses: ./.github/actions/export-deploy-matrix
 
   deploy:
     name: "${{ matrix.server.name }}: Deploy"
@@ -58,6 +53,7 @@ jobs:
       matrix:
         server: ${{ fromJson(needs.build.outputs.DEPLOYMENT_MATRIX) }}
     steps:
+      - uses: actions/checkout@v6
       - name: Download binary artifact
         uses: actions/download-artifact@v7
         with:
@@ -120,7 +116,16 @@ jobs:
             REDIS_BRPOP_TIMEOUT_SEC=30
             ENVEOF
 
-      - name: Restart Monitor Container
+      - name: Run after deploy
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ matrix.server.ip }}
+          username: ${{ matrix.server.username }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ matrix.server.port }}
+          script_path: .github/scripts/after-deploy.sh
+      - name: Optional extra after deploy commands
+        if: ${{ vars.DEPLOY_AFTER_HOOKS != '' }}
         uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ matrix.server.ip }}
@@ -128,7 +133,8 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           port: ${{ matrix.server.port }}
           script: |
-            docker restart digipulse-monitor || echo "Container not running yet."
+            set -euo pipefail
+            eval "${{ vars.DEPLOY_AFTER_HOOKS }}"
 
   delete-artifact:
     name: Delete GitHub artifact

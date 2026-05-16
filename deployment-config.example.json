@@ -1,0 +1,21 @@
+[
+    {
+        "_comment": "Do not commit deployment-config.json. Set GitHub Actions Variables instead:",
+        "required_variables": [
+            "DEPLOY_SERVER_NAME",
+            "DEPLOY_SERVER_IP",
+            "DEPLOY_SERVER_PORT",
+            "DEPLOY_SERVER_USERNAME",
+            "DEPLOY_SERVER_PATH"
+        ],
+        "optional_variables": [
+            "DEPLOY_AFTER_HOOKS"
+        ],
+        "after_deploy_script": ".github/scripts/after-deploy.sh",
+        "name": "digi-pulse-monitor",
+        "ip": "YOUR_SERVER_IP",
+        "port": "2229",
+        "username": "YOUR_SSH_USER",
+        "path": "/home/yurii/monitor"
+    }
+]
