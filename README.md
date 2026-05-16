@@ -52,6 +52,22 @@ Deployments are automated via **GitHub Actions**.
 | `INTERNET_OFFLINE_WAIT_SEC` | `10` | Sleep between probe retries when the network is down. |
 | `REDIS_BRPOP_TIMEOUT_SEC` | `30` | `BRPOP` block duration when internet check is enabled (re-probes when the queue is empty). Ignored when `INTERNET_CHECK_ENABLED=false`. |
 
+## Debugging
+
+### Inspect env vars inside the container
+
+`docker exec` spawns a new process that does not inherit variables set by the shell before `monitor_app` started. To inspect the environment of the main process (PID 1) directly:
+
+```bash
+docker exec digipulse-monitor cat /proc/1/environ | tr '\0' '\n' | grep -E "REDIS|HEARTBEAT"
+```
+
+- `/proc/1/environ` — Linux procfs file containing the env vars of PID 1 (`monitor_app`)
+- `tr '\0' '\n'` — replaces null bytes (the delimiter between variables) with newlines
+- `grep -E "REDIS|HEARTBEAT"` — filters for relevant variables
+
+Further reading on Linux procfs: https://man7.org/linux/man-pages/man5/proc_pid_environ.5.html
+
 ## Performance
 
 - **Footprint**: < 10MB RAM usage.
