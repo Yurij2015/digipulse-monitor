@@ -52,6 +52,30 @@ Deployments are automated via **GitHub Actions**.
 | `INTERNET_OFFLINE_WAIT_SEC` | `10` | Sleep between probe retries when the network is down. |
 | `REDIS_BRPOP_TIMEOUT_SEC` | `30` | `BRPOP` block duration when internet check is enabled (re-probes when the queue is empty). Ignored when `INTERNET_CHECK_ENABLED=false`. |
 
+## Removing sensitive data from git history
+
+If a file with credentials or server config (e.g. `deployment-config.json`) was accidentally committed, use [`git filter-repo`](https://github.com/newren/git-filter-repo) to erase it from the entire history:
+
+```bash
+# Install (macOS)
+brew install git-filter-repo
+
+# Rewrite history — removes the file from every commit on every branch
+git filter-repo --path deployment-config.json --invert-paths --force
+
+# git filter-repo removes 'origin' as a safety measure; add it back
+git remote add origin <repo-url>
+
+# Force-push the rewritten history
+git push --force origin main
+```
+
+**How it works:** `git filter-repo` replays every commit and drops any tree entry matching `--path`. `--invert-paths` means "keep everything *except* this path." The result is a new linear history where the file never existed. All commit SHAs change, so every collaborator must re-clone (`git clone`) — their existing local copies are incompatible with the new remote history.
+
+> **Warning:** this is a destructive, irreversible operation. GitHub caches may retain the old objects for up to 90 days; if the leak is critical, contact GitHub Support to purge the cache immediately.
+
+Official docs: https://htmlpreview.github.io/?https://github.com/newren/git-filter-repo/blob/docs/html/git-filter-repo.html
+
 ## Debugging
 
 ### Inspect env vars inside the container
