@@ -1,5 +1,22 @@
 name: Export deploy matrix from repository variables
-description: Builds DEPLOYMENT_MATRIX JSON from DEPLOY_SERVER_* GitHub Variables (no committed config).
+description: Builds DEPLOYMENT_MATRIX JSON from DEPLOY_SERVER_* inputs (pass vars from the workflow).
+
+inputs:
+  deploy_server_name:
+    description: DEPLOY_SERVER_NAME
+    required: true
+  deploy_server_ip:
+    description: DEPLOY_SERVER_IP
+    required: true
+  deploy_server_port:
+    description: DEPLOY_SERVER_PORT
+    required: true
+  deploy_server_username:
+    description: DEPLOY_SERVER_USERNAME
+    required: true
+  deploy_server_path:
+    description: DEPLOY_SERVER_PATH
+    required: true
 
 outputs:
   DEPLOYMENT_MATRIX:
@@ -13,11 +30,11 @@ runs:
       id: export
       shell: bash
       env:
-        DEPLOY_SERVER_NAME: ${{ vars.DEPLOY_SERVER_NAME }}
-        DEPLOY_SERVER_IP: ${{ vars.DEPLOY_SERVER_IP }}
-        DEPLOY_SERVER_PORT: ${{ vars.DEPLOY_SERVER_PORT }}
-        DEPLOY_SERVER_USERNAME: ${{ vars.DEPLOY_SERVER_USERNAME }}
-        DEPLOY_SERVER_PATH: ${{ vars.DEPLOY_SERVER_PATH }}
+        DEPLOY_SERVER_NAME: ${{ inputs.deploy_server_name }}
+        DEPLOY_SERVER_IP: ${{ inputs.deploy_server_ip }}
+        DEPLOY_SERVER_PORT: ${{ inputs.deploy_server_port }}
+        DEPLOY_SERVER_USERNAME: ${{ inputs.deploy_server_username }}
+        DEPLOY_SERVER_PATH: ${{ inputs.deploy_server_path }}
       run: |
         set -euo pipefail
         missing=()
@@ -27,8 +44,8 @@ runs:
           fi
         done
         if [ "${#missing[@]}" -gt 0 ]; then
-          echo "Missing GitHub Variables: ${missing[*]}"
-          echo "Set them under Settings → Secrets and variables → Actions → Variables"
+          echo "Missing deploy inputs: ${missing[*]}"
+          echo "Set GitHub Variables and pass them in the workflow uses: with: block"
           exit 1
         fi
         delimiter="$(openssl rand -hex 8)"

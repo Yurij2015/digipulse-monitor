@@ -44,6 +44,12 @@ jobs:
       - name: Export deployment matrix
         id: export-deployment-matrix
         uses: ./.github/actions/export-deploy-matrix
+        with:
+          deploy_server_name: ${{ vars.DEPLOY_SERVER_NAME }}
+          deploy_server_ip: ${{ vars.DEPLOY_SERVER_IP }}
+          deploy_server_port: ${{ vars.DEPLOY_SERVER_PORT }}
+          deploy_server_username: ${{ vars.DEPLOY_SERVER_USERNAME }}
+          deploy_server_path: ${{ vars.DEPLOY_SERVER_PATH }}
 
   deploy:
     name: "${{ matrix.server.name }}: Deploy"
