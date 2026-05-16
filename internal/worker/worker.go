@@ -78,14 +78,28 @@ func (w *Worker) Start(ctx context.Context) {
 		log.Printf("Outbound internet check enabled (probe: %s)", w.cfg.Connectivity.InternetProbeURL)
 	}
 
+	// Start a dedicated heartbeat goroutine so it never blocks on BRPop
+	go func() {
+		w.sendHeartbeat(ctx) // Initial heartbeat
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				w.sendHeartbeat(ctx)
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Worker shutting down...")
 			return
 		default:
-			// Heartbeat = worker process is alive and Redis is reachable (not outbound internet).
-			w.sendHeartbeat(ctx)
 
 			if w.cfg.Connectivity.InternetCheckEnabled && !w.outboundInternetReachable(ctx) {
 				log.Printf("No outbound internet (probe %s); not dequeuing tasks. Retrying in %v...",
