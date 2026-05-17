@@ -21,12 +21,14 @@ runs:
         DEPLOYMENT_MATRIX: ${{ inputs.deployment_matrix }}
       run: |
         set -euo pipefail
+        echo "Raw value: $(printf '%s' "$DEPLOYMENT_MATRIX" | cat -A | head -5)"
         if [ -z "${DEPLOYMENT_MATRIX:-}" ]; then
           echo "DEPLOYMENT_MATRIX variable is empty. Set it in GitHub Variables as a JSON array."
           exit 1
         fi
-        if ! echo "$DEPLOYMENT_MATRIX" | jq -e 'if type == "array" and length > 0 then . else error end' > /dev/null 2>&1; then
+        if ! printf '%s' "$DEPLOYMENT_MATRIX" | jq -e 'if type == "array" and length > 0 then . else error end' > /dev/null 2>&1; then
           echo "DEPLOYMENT_MATRIX must be a non-empty JSON array."
+          printf '%s' "$DEPLOYMENT_MATRIX" | jq '.' || true
           exit 1
         fi
         FILTERED="$(echo "$DEPLOYMENT_MATRIX" | jq '[.[] | select(.enabled != false)]')"
