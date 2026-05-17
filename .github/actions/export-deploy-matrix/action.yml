@@ -1,9 +1,21 @@
 name: Export deploy matrix from repository variables
-description: Passes DEPLOYMENT_MATRIX JSON variable to strategy.matrix.server. Set DEPLOYMENT_MATRIX in GitHub Variables as a JSON array, e.g. [{"name":"prod","ip":"1.2.3.4","port":"22","username":"deploy","path":"/var/www"}].
+description: Builds a DEPLOYMENT_MATRIX JSON array from individual server variables (name, ip, port, username, path).
 
 inputs:
-  deployment_matrix:
-    description: DEPLOYMENT_MATRIX — JSON array of server objects (name, ip, port, username, path). Set "enabled":false on any server to skip it.
+  deploy_server_name:
+    description: Server display name
+    required: true
+  deploy_server_ip:
+    description: Server IP address
+    required: true
+  deploy_server_port:
+    description: SSH port
+    required: true
+  deploy_server_username:
+    description: SSH username
+    required: true
+  deploy_server_path:
+    description: Deployment path on the server
     required: true
 
 outputs:
@@ -18,25 +30,29 @@ runs:
       id: export
       shell: bash
       env:
-        DEPLOYMENT_MATRIX: ${{ inputs.deployment_matrix }}
+        SERVER_NAME: ${{ inputs.deploy_server_name }}
+        SERVER_IP: ${{ inputs.deploy_server_ip }}
+        SERVER_PORT: ${{ inputs.deploy_server_port }}
+        SERVER_USERNAME: ${{ inputs.deploy_server_username }}
+        SERVER_PATH: ${{ inputs.deploy_server_path }}
       run: |
         set -euo pipefail
-        if [ -z "${DEPLOYMENT_MATRIX:-}" ]; then
-          echo "DEPLOYMENT_MATRIX variable is empty. Set it in GitHub Variables as a JSON array."
-          exit 1
-        fi
-        if ! echo "$DEPLOYMENT_MATRIX" | jq -e 'if type == "array" and length > 0 then . else error end' > /dev/null 2>&1; then
-          echo "DEPLOYMENT_MATRIX must be a non-empty JSON array."
-          exit 1
-        fi
-        FILTERED="$(echo "$DEPLOYMENT_MATRIX" | jq '[.[] | select(.enabled != false)]')"
-        if [ "$(echo "$FILTERED" | jq 'length')" -eq 0 ]; then
-          echo "No servers are enabled. Set enabled: true on at least one server in DEPLOYMENT_MATRIX."
-          exit 1
-        fi
+        for var in SERVER_NAME SERVER_IP SERVER_PORT SERVER_USERNAME SERVER_PATH; do
+          if [ -z "${!var:-}" ]; then
+            echo "Input ${var} is empty. Check that all DEPLOY_SERVER_* GitHub variables are set."
+            exit 1
+          fi
+        done
+        MATRIX="$(jq -cn '[{
+          "name":     env.SERVER_NAME,
+          "ip":       env.SERVER_IP,
+          "port":     env.SERVER_PORT,
+          "username": env.SERVER_USERNAME,
+          "path":     env.SERVER_PATH
+        }]')"
         delimiter="$(openssl rand -hex 8)"
         {
           echo "DEPLOYMENT_MATRIX<<${delimiter}"
-          echo "$FILTERED"
+          echo "$MATRIX"
           echo "${delimiter}"
         } >> "${GITHUB_OUTPUT}"
