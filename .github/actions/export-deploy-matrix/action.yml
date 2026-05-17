@@ -1,21 +1,9 @@
 name: Export deploy matrix from repository variables
-description: Builds DEPLOYMENT_MATRIX JSON from DEPLOY_SERVER_* inputs (pass vars from the workflow).
+description: Passes DEPLOYMENT_MATRIX JSON variable to strategy.matrix.server. Set DEPLOYMENT_MATRIX in GitHub Variables as a JSON array, e.g. [{"name":"prod","ip":"1.2.3.4","port":"22","username":"deploy","path":"/var/www"}].
 
 inputs:
-  deploy_server_name:
-    description: DEPLOY_SERVER_NAME
-    required: true
-  deploy_server_ip:
-    description: DEPLOY_SERVER_IP
-    required: true
-  deploy_server_port:
-    description: DEPLOY_SERVER_PORT
-    required: true
-  deploy_server_username:
-    description: DEPLOY_SERVER_USERNAME
-    required: true
-  deploy_server_path:
-    description: DEPLOY_SERVER_PATH
+  deployment_matrix:
+    description: DEPLOYMENT_MATRIX — JSON array of server objects (name, ip, port, username, path). Set "enabled":false on any server to skip it.
     required: true
 
 outputs:
@@ -26,38 +14,29 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Build matrix JSON
+    - name: Validate and export matrix JSON
       id: export
       shell: bash
       env:
-        DEPLOY_SERVER_NAME: ${{ inputs.deploy_server_name }}
-        DEPLOY_SERVER_IP: ${{ inputs.deploy_server_ip }}
-        DEPLOY_SERVER_PORT: ${{ inputs.deploy_server_port }}
-        DEPLOY_SERVER_USERNAME: ${{ inputs.deploy_server_username }}
-        DEPLOY_SERVER_PATH: ${{ inputs.deploy_server_path }}
+        DEPLOYMENT_MATRIX: ${{ inputs.deployment_matrix }}
       run: |
         set -euo pipefail
-        missing=()
-        for key in DEPLOY_SERVER_NAME DEPLOY_SERVER_IP DEPLOY_SERVER_PORT DEPLOY_SERVER_USERNAME DEPLOY_SERVER_PATH; do
-          if [ -z "${!key:-}" ]; then
-            missing+=("$key")
-          fi
-        done
-        if [ "${#missing[@]}" -gt 0 ]; then
-          echo "Missing deploy inputs: ${missing[*]}"
-          echo "Set GitHub Variables and pass them in the workflow uses: with: block"
+        if [ -z "${DEPLOYMENT_MATRIX:-}" ]; then
+          echo "DEPLOYMENT_MATRIX variable is empty. Set it in GitHub Variables as a JSON array."
+          exit 1
+        fi
+        if ! echo "$DEPLOYMENT_MATRIX" | jq -e 'if type == "array" and length > 0 then . else error end' > /dev/null 2>&1; then
+          echo "DEPLOYMENT_MATRIX must be a non-empty JSON array."
+          exit 1
+        fi
+        FILTERED="$(echo "$DEPLOYMENT_MATRIX" | jq '[.[] | select(.enabled != false)]')"
+        if [ "$(echo "$FILTERED" | jq 'length')" -eq 0 ]; then
+          echo "No servers are enabled. Set enabled: true on at least one server in DEPLOYMENT_MATRIX."
           exit 1
         fi
         delimiter="$(openssl rand -hex 8)"
-        JSON="$(jq -n \
-          --arg name "$DEPLOY_SERVER_NAME" \
-          --arg ip "$DEPLOY_SERVER_IP" \
-          --arg port "$DEPLOY_SERVER_PORT" \
-          --arg username "$DEPLOY_SERVER_USERNAME" \
-          --arg path "$DEPLOY_SERVER_PATH" \
-          '[{name:$name,ip:$ip,port:$port,username:$username,path:$path}]')"
         {
           echo "DEPLOYMENT_MATRIX<<${delimiter}"
-          echo "$JSON"
+          echo "$FILTERED"
           echo "${delimiter}"
         } >> "${GITHUB_OUTPUT}"
