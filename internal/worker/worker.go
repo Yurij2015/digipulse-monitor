@@ -12,6 +12,7 @@ import (
 	"net/http/httptrace"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"monitor/internal/config"
@@ -46,14 +47,18 @@ type CheckResult struct {
 	ResponseTimeMS  *int64                 `json:"response_time_ms,omitempty"`
 	ErrorMessage    string                 `json:"error_message,omitempty"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	ScheduledAt     *time.Time             `json:"scheduled_at,omitempty"`
+	ExecutedAt      time.Time              `json:"executed_at"`
 }
 
 type Worker struct {
-	cfg        *config.Config
-	redis      *redis.Client
-	geo        *service.GeoIPService
-	ssl        *service.SSLService
-	pingRunner PingRunner
+	cfg          *config.Config
+	redis        *redis.Client
+	geo          *service.GeoIPService
+	ssl          *service.SSLService
+	pingRunner   PingRunner
+	lastExecuted map[uint]time.Time
+	lastExecMu   sync.Mutex
 }
 
 func NewWorker(cfg *config.Config) *Worker {
@@ -64,11 +69,12 @@ func NewWorker(cfg *config.Config) *Worker {
 	})
 
 	return &Worker{
-		cfg:        cfg,
-		redis:      rdb,
-		geo:        service.NewGeoIPService(),
-		ssl:        service.NewSSLService(),
-		pingRunner: ExecPingRunner{},
+		cfg:          cfg,
+		redis:        rdb,
+		geo:          service.NewGeoIPService(),
+		ssl:          service.NewSSLService(),
+		pingRunner:   ExecPingRunner{},
+		lastExecuted: make(map[uint]time.Time),
 	}
 }
 
@@ -187,22 +193,36 @@ func (w *Worker) sleepOrDone(ctx context.Context, d time.Duration) bool {
 }
 
 func (w *Worker) processTask(task CheckTask) {
-	if task.ScheduledAt != "" && task.UpdateInterval > 0 {
-		scheduledTime, err := time.Parse(time.RFC3339, task.ScheduledAt)
-		if err == nil {
-			maxAge := time.Duration((task.UpdateInterval*2)-1) * time.Second
-			if time.Since(scheduledTime) > maxAge {
-				log.Printf("Skipping stale task [%s] for %s (Scheduled: %s, Max Age: %v)",
-					task.ID, task.URL, task.ScheduledAt, maxAge)
-				return
-			}
+	executedAt := time.Now()
+
+	if task.UpdateInterval > 0 {
+		minInterval := time.Duration(task.UpdateInterval) * time.Second
+		w.lastExecMu.Lock()
+		last, seen := w.lastExecuted[task.ConfigurationID]
+		if seen && executedAt.Sub(last) < minInterval {
+			w.lastExecMu.Unlock()
+			log.Printf("Rate limiting config %d: last check %v ago, interval %v — skipping",
+				task.ConfigurationID, executedAt.Sub(last).Round(time.Millisecond), minInterval)
+			return
 		}
+		w.lastExecuted[task.ConfigurationID] = executedAt
+		w.lastExecMu.Unlock()
 	}
 
 	log.Printf("Processing [%s] check for Site: %s", task.Type, task.URL)
 
 	var result CheckResult
 	result.ConfigurationID = task.ConfigurationID
+	result.ExecutedAt = executedAt
+
+	if task.ScheduledAt != "" {
+		if scheduledAt, err := time.Parse(time.RFC3339, task.ScheduledAt); err == nil {
+			result.ScheduledAt = &scheduledAt
+			if lag := executedAt.Sub(scheduledAt); lag > 0 {
+				log.Printf("Task [%s] lag: %v", task.ID, lag.Round(time.Millisecond))
+			}
+		}
+	}
 
 	switch task.Type {
 	case "http":

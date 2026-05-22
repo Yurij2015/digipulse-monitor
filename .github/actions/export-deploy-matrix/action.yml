@@ -3,7 +3,7 @@ description: Passes DEPLOYMENT_MATRIX JSON variable to strategy.matrix.server. S
 
 inputs:
   deployment_matrix:
-    description: DEPLOYMENT_MATRIX — JSON array of server objects (name, ip, port, username, path). Set "enabled":false on any server to skip it.
+    description: DEPLOYMENT_MATRIX — JSON array of server objects (name, ip, port, username, path, environment). Set "enabled":false on any server to skip it. "environment" maps to a GitHub Environment for scoped secrets/vars.
     required: true
 
 outputs:
