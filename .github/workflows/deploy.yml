@@ -72,7 +72,7 @@ jobs:
           port: ${{ matrix.server.port }}
           script: |
             mkdir -p ${{ matrix.server.path }}
-            sudo rm -f ${{ matrix.server.path }}/monitor_app
+            rm -f ${{ matrix.server.path }}/monitor_app
 
       - name: Deploy binary to server via SCP
         uses: appleboy/scp-action@v1.0.0
