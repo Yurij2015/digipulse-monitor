@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"monitor/internal/config"
@@ -52,13 +53,14 @@ type CheckResult struct {
 }
 
 type Worker struct {
-	cfg          *config.Config
-	redis        *redis.Client
-	geo          *service.GeoIPService
-	ssl          *service.SSLService
-	pingRunner   PingRunner
-	lastExecuted map[uint]time.Time
-	lastExecMu   sync.Mutex
+	cfg            *config.Config
+	redis          *redis.Client
+	geo            *service.GeoIPService
+	ssl            *service.SSLService
+	pingRunner     PingRunner
+	lastExecuted   map[uint]time.Time
+	lastExecMu     sync.Mutex
+	internetOnline atomic.Bool
 }
 
 func NewWorker(cfg *config.Config) *Worker {
@@ -68,7 +70,7 @@ func NewWorker(cfg *config.Config) *Worker {
 		DB:       cfg.Redis.DB,
 	})
 
-	return &Worker{
+	w := &Worker{
 		cfg:          cfg,
 		redis:        rdb,
 		geo:          service.NewGeoIPService(),
@@ -76,13 +78,17 @@ func NewWorker(cfg *config.Config) *Worker {
 		pingRunner:   ExecPingRunner{},
 		lastExecuted: make(map[uint]time.Time),
 	}
+	w.internetOnline.Store(true) // assume online until first probe
+	return w
 }
 
 func (w *Worker) Start(ctx context.Context) {
 	log.Printf("Starting Redis worker (Queue mode) on key: %s", w.cfg.Redis.ChannelName)
 	log.Printf("Heartbeat Redis key: %s", w.cfg.Redis.HeartbeatKey)
 	if w.cfg.Connectivity.InternetCheckEnabled {
-		log.Printf("Outbound internet check enabled (probe: %s)", w.cfg.Connectivity.InternetProbeURL)
+		log.Printf("Outbound internet check enabled (probe: %s, interval: %v)",
+			w.cfg.Connectivity.InternetProbeURL, w.cfg.Connectivity.ProbeInterval)
+		go w.runInternetProber(ctx)
 	}
 
 	// Start a dedicated heartbeat goroutine so it never blocks on BRPop
@@ -107,14 +113,10 @@ func (w *Worker) Start(ctx context.Context) {
 			log.Println("Worker shutting down...")
 			return
 		default:
-
-			if w.cfg.Connectivity.InternetCheckEnabled && !w.outboundInternetReachable(ctx) {
-				log.Printf("No outbound internet (probe %s); not dequeuing tasks. Retrying in %v...",
-					w.cfg.Connectivity.InternetProbeURL, w.cfg.Connectivity.OfflineWait)
+			if w.cfg.Connectivity.InternetCheckEnabled && !w.internetOnline.Load() {
 				if !w.sleepOrDone(ctx, w.cfg.Connectivity.OfflineWait) {
 					return
 				}
-
 				continue
 			}
 
@@ -123,7 +125,6 @@ func (w *Worker) Start(ctx context.Context) {
 				brPopBlock = 0
 			}
 
-			// BRPOP returns [key, value]. Non-zero block re-runs the internet probe when the queue is idle.
 			res, err := w.redis.BRPop(ctx, brPopBlock, w.cfg.Redis.ChannelName).Result()
 			if errors.Is(err, redis.Nil) {
 				continue
@@ -147,6 +148,32 @@ func (w *Worker) Start(ctx context.Context) {
 			}
 
 			go w.processTask(task)
+		}
+	}
+}
+
+func (w *Worker) runInternetProber(ctx context.Context) {
+	probe := func() {
+		online := w.outboundInternetReachable(ctx)
+		prev := w.internetOnline.Swap(online)
+		if prev && !online {
+			log.Printf("Internet connectivity lost (probe: %s)", w.cfg.Connectivity.InternetProbeURL)
+		} else if !prev && online {
+			log.Printf("Internet connectivity restored (probe: %s)", w.cfg.Connectivity.InternetProbeURL)
+		}
+	}
+
+	probe() // initial check at startup
+
+	ticker := time.NewTicker(w.cfg.Connectivity.ProbeInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			probe()
 		}
 	}
 }
