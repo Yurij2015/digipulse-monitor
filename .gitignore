@@ -42,3 +42,6 @@ Thumbs.db
 *.log
 
 deployment-config.json
+
+# Internal team notes (not for public repo)
+docs/internal/

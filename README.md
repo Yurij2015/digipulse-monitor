@@ -1,18 +1,21 @@
 # DigiPulse Monitor (Go Service)
 
-Ultra-fast, event-driven site monitoring service built in Go. This service handles the actual website reachability checks and reports results back to the Laravel backend via Redis queues.
+Part of **DigiPulse** — a production SaaS for website and SSL monitoring built on an event-driven architecture: Laravel core dispatches check tasks via Redis queues; this Go worker processes them concurrently and pushes results back.
+
+The service handles the actual reachability checks (HTTP, SSL, Ping) and is designed to stay out of the way: statically compiled, under 10 MB RAM, no runtime dependencies beyond Redis.
 
 ## Technology Stack
 
 - **Go 1.23**
-- **Redis 7** (Event-driven communication)
-- **Deployment**: Statically compiled binary in an Alpine container.
+- **Redis 7** (event-driven task queue and result reporting)
+- **Deployment**: static binary compiled with `CGO_ENABLED=0`, shipped in an Alpine container via GitHub Actions CI/CD
 
 ## Architecture
 
-1.  **Job Acquisition**: Reads check tasks from a Redis queue dispatched by the Laravel Scheduler.
-2.  **Concurrency**: Uses Go routines to perform multiple checks (HTTP, SSL, Ping) simultaneously.
-3.  **Reporting**: Pushes check results to a Redis results queue consumed by Laravel (`app:consume-monitor-results`).
+1. **Job Acquisition**: Reads check tasks from a Redis queue dispatched by the Laravel Scheduler.
+2. **Concurrency**: Spawns a goroutine per check task — HTTP, SSL certificate, and Ping run in parallel per site.
+3. **Reporting**: Pushes results to a Redis results queue consumed by Laravel (`app:consume-monitor-results`).
+4. **Connectivity guard**: Probes outbound internet before each `BRPOP` cycle; backs off automatically when the network is unavailable instead of flooding error logs.
 
 ## Deployment (CI/CD)
 
@@ -52,30 +55,6 @@ Deployments are automated via **GitHub Actions**.
 | `INTERNET_OFFLINE_WAIT_SEC` | `10` | Sleep between probe retries when the network is down. |
 | `REDIS_BRPOP_TIMEOUT_SEC` | `30` | `BRPOP` block duration when internet check is enabled (re-probes when the queue is empty). Ignored when `INTERNET_CHECK_ENABLED=false`. |
 
-## Removing sensitive data from git history
-
-If a file with credentials or server config (e.g. `deployment-config.json`) was accidentally committed, use [`git filter-repo`](https://github.com/newren/git-filter-repo) to erase it from the entire history:
-
-```bash
-# Install (macOS)
-brew install git-filter-repo
-
-# Rewrite history — removes the file from every commit on every branch
-git filter-repo --path deployment-config.json --invert-paths --force
-
-# git filter-repo removes 'origin' as a safety measure; add it back
-git remote add origin <repo-url>
-
-# Force-push the rewritten history
-git push --force origin main
-```
-
-**How it works:** `git filter-repo` replays every commit and drops any tree entry matching `--path`. `--invert-paths` means "keep everything *except* this path." The result is a new linear history where the file never existed. All commit SHAs change, so every collaborator must re-clone (`git clone`) — their existing local copies are incompatible with the new remote history.
-
-> **Warning:** this is a destructive, irreversible operation. GitHub caches may retain the old objects for up to 90 days; if the leak is critical, contact GitHub Support to purge the cache immediately.
-
-Official docs: https://htmlpreview.github.io/?https://github.com/newren/git-filter-repo/blob/docs/html/git-filter-repo.html
-
 ## Debugging
 
 ### Inspect env vars inside the container
@@ -94,5 +73,6 @@ Further reading on Linux procfs: https://man7.org/linux/man-pages/man5/proc_pid_
 
 ## Performance
 
-- **Footprint**: < 10MB RAM usage.
-- **Speed**: Optimized for sub-second DNS and HTTP resolution.
+- **Footprint**: < 10 MB RSS in production.
+- **Resolution**: Sub-second DNS and HTTP checks; goroutine-per-task concurrency keeps latency flat under load.
+- **Binary**: statically compiled (`CGO_ENABLED=0`), no shared library dependencies — works in a bare Alpine image.
