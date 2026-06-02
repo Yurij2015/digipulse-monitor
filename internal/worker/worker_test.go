@@ -2,6 +2,9 @@ package worker
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -74,6 +77,46 @@ func requireInternet(t *testing.T, w *Worker) {
 
 	if !w.outboundInternetReachable(context.Background()) {
 		t.Skipf("skipping integration test: outbound internet probe %s is not reachable", connectivityProbeURL)
+	}
+}
+
+func TestCheckHTTPStatusCodes(t *testing.T) {
+	cases := []struct {
+		code       int
+		wantStatus string
+	}{
+		{200, "up"},
+		{201, "up"},
+		{301, "up"},
+		{304, "up"},
+		{401, "up"},
+		{403, "up"},
+		{429, "up"},
+		{404, "down"},
+		{410, "down"},
+		{422, "down"},
+		{500, "down"},
+		{502, "down"},
+		{503, "down"},
+	}
+
+	w := &Worker{}
+
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("HTTP_%d", tc.code), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.code)
+			}))
+			defer srv.Close()
+
+			task := &CheckTask{URL: srv.URL}
+			result := &CheckResult{}
+			w.checkHTTP(task, result)
+
+			if result.Status != tc.wantStatus {
+				t.Errorf("HTTP %d: got status %q, want %q (error=%q)", tc.code, result.Status, tc.wantStatus, result.ErrorMessage)
+			}
+		})
 	}
 }
 

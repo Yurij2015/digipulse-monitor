@@ -299,6 +299,9 @@ func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
 		} else {
 			result.Status = "up"
 		}
+	case resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 429:
+		// Server responded and actively denied the request — site is up, bot is blocked.
+		result.Status = "up"
 	default:
 		result.Status = "down"
 		result.ErrorMessage = fmt.Sprintf("HTTP Status: %d", resp.StatusCode)
