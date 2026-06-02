@@ -20,6 +20,7 @@ type ConnectivityConfig struct {
 	InternetCheckEnabled bool
 	InternetProbeURL     string
 	ProbeTimeout         time.Duration
+	ProbeInterval        time.Duration
 	OfflineWait          time.Duration
 	RedisBRPopBlock      time.Duration
 }
@@ -76,6 +77,7 @@ func Load() *Config {
 			InternetCheckEnabled: internetCheckEnabled,
 			InternetProbeURL:     getEnv("INTERNET_PROBE_URL", "https://www.cloudflare.com"),
 			ProbeTimeout:         time.Duration(getEnvAsInt("INTERNET_PROBE_TIMEOUT_SEC", 5)) * time.Second,
+			ProbeInterval:        time.Duration(getEnvAsInt("INTERNET_PROBE_INTERVAL_SEC", 30)) * time.Second,
 			OfflineWait:          time.Duration(getEnvAsInt("INTERNET_OFFLINE_WAIT_SEC", 10)) * time.Second,
 			RedisBRPopBlock:      redisBRPopBlock,
 		},
