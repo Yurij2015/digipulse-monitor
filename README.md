@@ -54,6 +54,8 @@ Deployments are automated via **GitHub Actions**.
 | `INTERNET_PROBE_TIMEOUT_SEC` | `5` | Timeout for a single probe request. |
 | `INTERNET_OFFLINE_WAIT_SEC` | `10` | Sleep between probe retries when the network is down. |
 | `REDIS_BRPOP_TIMEOUT_SEC` | `30` | `BRPOP` block duration when internet check is enabled (re-probes when the queue is empty). Ignored when `INTERNET_CHECK_ENABLED=false`. |
+| `RETRY_MAX` | `2` | Extra attempts when a check returns `down` before the result is reported (`0` disables). Filters transient failures such as lost ICMP packets or TCP resets. |
+| `RETRY_DELAY_SEC` | `5` | Pause between those attempts. |
 
 ## Debugging
 

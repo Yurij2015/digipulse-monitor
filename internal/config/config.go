@@ -13,6 +13,13 @@ type Config struct {
 	Log          LogConfig
 	Redis        RedisConfig
 	Connectivity ConnectivityConfig
+	Retry        RetryConfig
+}
+
+// RetryConfig controls re-check behaviour when a monitor task returns "down".
+type RetryConfig struct {
+	MaxRetries int
+	RetryDelay time.Duration
 }
 
 // ConnectivityConfig controls pre-flight checks before dequeuing monitor tasks.
@@ -80,6 +87,10 @@ func Load() *Config {
 			ProbeInterval:        time.Duration(getEnvAsInt("INTERNET_PROBE_INTERVAL_SEC", 30)) * time.Second,
 			OfflineWait:          time.Duration(getEnvAsInt("INTERNET_OFFLINE_WAIT_SEC", 10)) * time.Second,
 			RedisBRPopBlock:      redisBRPopBlock,
+		},
+		Retry: RetryConfig{
+			MaxRetries: getEnvAsInt("RETRY_MAX", 2),
+			RetryDelay: time.Duration(getEnvAsInt("RETRY_DELAY_SEC", 5)) * time.Second,
 		},
 	}
 }

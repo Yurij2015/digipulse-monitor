@@ -238,17 +238,57 @@ func (w *Worker) processTask(task CheckTask) {
 
 	log.Printf("Processing [%s] check for Site: %s", task.Type, task.URL)
 
-	var result CheckResult
-	result.ConfigurationID = task.ConfigurationID
-	result.ExecutedAt = executedAt
-
+	var scheduledAt *time.Time
 	if task.ScheduledAt != "" {
-		if scheduledAt, err := time.Parse(time.RFC3339, task.ScheduledAt); err == nil {
-			result.ScheduledAt = &scheduledAt
-			if lag := executedAt.Sub(scheduledAt); lag > 0 {
+		if t, err := time.Parse(time.RFC3339, task.ScheduledAt); err == nil {
+			scheduledAt = &t
+			if lag := executedAt.Sub(t); lag > 0 {
 				log.Printf("Task [%s] lag: %v", task.ID, lag.Round(time.Millisecond))
 			}
 		}
+	}
+
+	w.reportResult(w.runCheckWithRetry(task, scheduledAt))
+}
+
+// runCheckWithRetry re-runs a check that returned "down" up to Retry.MaxRetries
+// times, so a single transient failure (lost ICMP packets, TCP reset, DNS blip)
+// is not reported as an outage. Only the final attempt's result is returned.
+func (w *Worker) runCheckWithRetry(task CheckTask, scheduledAt *time.Time) CheckResult {
+	maxAttempts := 1
+	var retryDelay time.Duration
+	if w.cfg != nil {
+		maxAttempts += max(w.cfg.Retry.MaxRetries, 0)
+		retryDelay = w.cfg.Retry.RetryDelay
+	}
+
+	var result CheckResult
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		result = w.runCheck(task, scheduledAt)
+
+		if result.Status != "down" {
+			if attempt > 1 {
+				log.Printf("Config %d [%s] recovered on attempt %d/%d (status: %s)",
+					task.ConfigurationID, task.Type, attempt, maxAttempts, result.Status)
+			}
+			return result
+		}
+
+		if attempt < maxAttempts {
+			log.Printf("Config %d [%s] down on attempt %d/%d (err: %s), retrying in %v",
+				task.ConfigurationID, task.Type, attempt, maxAttempts, result.ErrorMessage, retryDelay)
+			time.Sleep(retryDelay)
+		}
+	}
+
+	return result
+}
+
+func (w *Worker) runCheck(task CheckTask, scheduledAt *time.Time) CheckResult {
+	result := CheckResult{
+		ConfigurationID: task.ConfigurationID,
+		ExecutedAt:      time.Now(),
+		ScheduledAt:     scheduledAt,
 	}
 
 	switch task.Type {
@@ -263,18 +303,17 @@ func (w *Worker) processTask(task CheckTask) {
 	case "ping":
 		w.checkPing(&task, &result)
 	default:
-		w.checkHTTP(&task, &result) // Default to HTTP
+		w.checkHTTP(&task, &result)
 	}
 
-	// If the check was successful but took less than 1ms (e.g. local loopback),
-	// record it as 1ms instead of 0ms so it doesn't look like an error.
+	// Clamp sub-millisecond up results to 1ms so they don't look like an error.
 	// SSL cache hits omit response_time_ms entirely.
 	if result.Status == "up" && result.ResponseTimeMS != nil && *result.ResponseTimeMS <= 0 {
 		one := int64(1)
 		result.ResponseTimeMS = &one
 	}
 
-	w.reportResult(result)
+	return result
 }
 
 func (w *Worker) checkHTTP(task *CheckTask, result *CheckResult) {
